@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interview Scheduling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#16233F;
+    --navy-2:#1E2E52;
+    --paper:#F1F2F4;
+    --card:#FFFFFF;
+    --ink:#181B22;
+    --slate:#5C6470;
+    --slate-light:#8A93A3;
+    --line:#DADFE6;
+    --gold:#C79A3B;
+    --gold-dark:#A87F2C;
+    --gold-bg:#FBF3E1;
+    --success:#2F7D5E;
+    --success-bg:#E7F4EE;
+    --danger:#B3432B;
+    --danger-bg:#FDF0EC;
+    --warn-bg:#FFF6E8;
+    --warn-border:#E2AE4E;
+    --radius:14px;
+    --shadow: 0 2px 8px rgba(22,35,63,0.06), 0 1px 2px rgba(22,35,63,0.08);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Inter', -apple-system, 'Segoe UI', sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{ font-family:'JetBrains Mono', monospace; }
+  #app{ min-height:100vh; display:flex; flex-direction:column; }
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    background:linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%);
+    color:#fff;
+    padding:18px 24px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .topbar .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width:32px;height:32px;border-radius:8px;
+    background:var(--gold);
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;color:var(--navy);font-size:15px;
+  }
+  .brand-name{ font-weight:700; font-size:16px; letter-spacing:0.2px; }
+  .brand-sub{ font-size:12px; color:#B9C2D6; margin-top:1px; }
+  .topbar .right{ display:flex; align-items:center; gap:12px; font-size:13px; color:#CBD3E3;}
+  .badge-admin{
+    background:var(--gold); color:var(--navy); font-weight:700;
+    font-size:11px; padding:4px 10px; border-radius:100px; letter-spacing:0.3px;
+  }
+  .link-btn{
+    background:none;border:1px solid rgba(255,255,255,0.35);color:#fff;
+    padding:7px 14px;border-radius:8px;font-size:13px;cursor:pointer;
+    font-family:inherit; transition:background .15s;
+  }
+  .link-btn:hover{ background:rgba(255,255,255,0.12); }
+
+  /* ---------- layout wrappers ---------- */
+  .center-screen{
+    flex:1; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .main-wrap{ flex:1; max-width:880px; width:100%; margin:0 auto; padding:28px 20px 60px; }
+  .admin-wrap{ flex:1; max-width:1120px; width:100%; margin:0 auto; padding:28px 20px 60px; }
+
+  /* ---------- card ---------- */
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:32px;
+  }
+  .gate-card{ width:100%; max-width:400px; }
+  .gate-title{ font-size:22px; font-weight:800; margin:0 0 6px; letter-spacing:-0.2px;}
+  .gate-sub{ font-size:13.5px; color:var(--slate); margin:0 0 24px; line-height:1.5;}
+  label{ display:block; font-size:13px; font-weight:600; color:var(--ink); margin-bottom:6px;}
+  input[type=text], input[type=email], input[type=password], input[type=number]{
+    width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px;
+    font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff;
+    transition:border-color .15s;
+  }
+  input:focus{ outline:none; border-color:var(--gold-dark); }
+  .field{ margin-bottom:16px; }
+  .hint{ font-size:12px; color:var(--slate-light); margin-top:5px; }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:13px 20px; border-radius:10px; font-size:14.5px; font-weight:700;
+    cursor:pointer; border:none; font-family:inherit; transition:transform .08s, opacity .15s;
+    width:100%;
+  }
+  .btn:active{ transform:scale(0.985); }
+  .btn-primary{ background:var(--navy); color:#fff; }
+  .btn-primary:hover{ background:var(--navy-2); }
+  .btn-primary:disabled{ background:#B7BEC9; cursor:not-allowed; }
+  .btn-gold{ background:var(--gold); color:var(--navy); }
+  .btn-gold:hover{ background:var(--gold-dark); color:#fff; }
+  .btn-gold:disabled{ background:#E9DDBC; color:#9C9271; cursor:not-allowed; }
+  .btn-ghost{ background:transparent; color:var(--slate); border:1.5px solid var(--line); }
+  .btn-ghost:hover{ background:#F5F6F8; }
+  .btn-danger-outline{ background:#fff; color:var(--danger); border:1.5px solid #EAC2B4; }
+  .btn-danger-outline:hover{ background:var(--danger-bg); }
+  .btn-sm{ width:auto; padding:8px 14px; font-size:13px; }
+  .error-text{ color:var(--danger); font-size:13px; margin-top:10px; font-weight:600; }
+  .success-text{ color:var(--success); font-size:13px; margin-top:10px; font-weight:600; }
+
+  /* ---------- steps ---------- */
+  .steps{ display:flex; gap:6px; margin-bottom:26px; }
+  .step-pill{
+    flex:1; height:5px; border-radius:100px; background:var(--line);
+  }
+  .step-pill.active{ background:var(--gold); }
+  .step-pill.done{ background:var(--navy); }
+  .step-label{ font-size:12.5px; color:var(--slate-light); font-weight:600; margin-bottom:4px; letter-spacing:0.3px; text-transform:uppercase;}
+  .step-heading{ font-size:20px; font-weight:800; margin:0 0 22px; }
+
+  /* ---------- date grid ---------- */
+  .date-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(110px,1fr));
+    gap:10px; margin-bottom:8px;
+  }
+  .date-btn{
+    border:1.5px solid var(--line); background:#fff; border-radius:10px;
+    padding:12px 8px; text-align:center; cursor:pointer; transition:.12s;
+  }
+  .date-btn:hover{ border-color:var(--gold-dark); }
+  .date-btn.selected{ border-color:var(--navy); background:var(--navy); color:#fff; }
+  .date-btn .dow{ font-size:11px; color:var(--slate-light); font-weight:600; }
+  .date-btn.selected .dow{ color:#B9C2D6; }
+  .date-btn .dnum{ font-size:16px; font-weight:800; margin-top:2px; }
+  .date-btn .avail{ font-size:10.5px; margin-top:4px; color:var(--success); font-weight:600; }
+  .date-btn.selected .avail{ color:#9FE3C4; }
+  .date-btn.full{ opacity:0.4; cursor:not-allowed; }
+  .date-btn.full .avail{ color:var(--danger); }
+  .date-btn.closed{ opacity:0.55; cursor:not-allowed; background:#FAFAFB; border-style:dashed; }
+  .date-btn.closed .avail{ color:var(--slate-light); }
+  .date-btn.closed .dow, .date-btn.closed .dnum{ color:var(--slate-light); }
+
+  .week-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .week-range{ font-size:13.5px; font-weight:700; color:var(--ink); }
+  .date-grid-week{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+  .week-cell{ padding:16px 8px; }
+  @media (max-width:520px){
+    .date-grid-week{ grid-template-columns:repeat(5,1fr); gap:6px; }
+    .week-cell{ padding:10px 4px; }
+    .week-cell .dnum{ font-size:13px; }
+    .week-cell .avail{ font-size:9px; }
+  }
+
+  /* ---------- slot grid ---------- */
+  .slot-section-label{ font-size:13px; font-weight:700; color:var(--slate); margin:18px 0 10px; }
+  .slot-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:10px; }
+  .slot-btn{
+    border:1.5px solid var(--line); background:#fff; border-radius:10px;
+    padding:12px 8px; text-align:center; cursor:pointer; transition:.12s;
+    font-family:'JetBrains Mono',monospace; font-weight:600; font-size:14px;
+  }
+  .slot-btn:hover{ border-color:var(--gold-dark); }
+  .slot-btn.selected{ border-color:var(--navy); background:var(--navy); color:#fff; }
+  .slot-btn .cap{ font-family:'Inter',sans-serif; font-size:10.5px; color:var(--slate-light); margin-top:3px; font-weight:600;}
+  .slot-btn.selected .cap{ color:#B9C2D6; }
+  .slot-btn.full{ opacity:0.35; cursor:not-allowed; text-decoration:line-through; }
+
+  /* ---------- warning boxes ---------- */
+  .warn-box{
+    border:2px solid var(--warn-border); background:var(--warn-bg); border-radius:12px;
+    padding:18px 18px; margin-bottom:16px; display:flex; gap:12px; align-items:flex-start;
+  }
+  .warn-box .icon{ font-size:22px; line-height:1; }
+  .warn-box .txt{ font-size:14.5px; line-height:1.6; font-weight:600; color:#5C4413; }
+  .warn-box.strong{ border-color:var(--danger); background:var(--danger-bg); }
+  .warn-box.strong .txt{ color:#7A2E1B; font-size:15px; }
+  .agree-row{ display:flex; align-items:flex-start; gap:10px; margin-top:10px; }
+  .agree-row input[type=checkbox]{ width:20px; height:20px; margin-top:2px; flex-shrink:0; accent-color:var(--navy); cursor:pointer;}
+  .agree-row .agree-txt{ font-size:13.5px; color:var(--ink); font-weight:600; line-height:1.5; cursor:pointer;}
+
+  /* ---------- ticket / confirmation ---------- */
+  .ticket{
+    border:2px dashed var(--navy); border-radius:16px; padding:28px;
+    background:linear-gradient(135deg, #fff 0%, #F7F8FA 100%); position:relative; overflow:hidden;
+  }
+  .ticket::before, .ticket::after{
+    content:''; position:absolute; width:24px; height:24px; background:var(--paper);
+    border-radius:50%; top:50%; transform:translateY(-50%);
+  }
+  .ticket::before{ left:-12px; }
+  .ticket::after{ right:-12px; }
+  .ticket-eyebrow{ font-size:11px; font-weight:700; color:var(--gold-dark); letter-spacing:1.5px; text-transform:uppercase; }
+  .ticket-name{ font-size:24px; font-weight:800; margin:6px 0 18px; }
+  .ticket-row{ display:flex; justify-content:space-between; padding:10px 0; border-top:1px dashed var(--line); font-size:14px; }
+  .ticket-row:first-of-type{ border-top:none; }
+  .ticket-row .k{ color:var(--slate); font-weight:600; }
+  .ticket-row .v{ font-weight:700; font-family:'JetBrains Mono',monospace; }
+
+  /* ---------- admin tabs ---------- */
+  .admin-tabs{ display:flex; gap:6px; margin-bottom:22px; border-bottom:1.5px solid var(--line); flex-wrap:wrap; }
+  .admin-tab{
+    padding:11px 16px; font-size:14px; font-weight:700; color:var(--slate); cursor:pointer;
+    border-bottom:2.5px solid transparent; margin-bottom:-1.5px; transition:.12s; user-select:none;
+  }
+  .admin-tab.active{ color:var(--navy); border-bottom-color:var(--gold); }
+  .admin-tab:hover{ color:var(--navy); }
+
+  /* ---------- calendar ---------- */
+  .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .cal-title{ font-size:17px; font-weight:800; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .cal-dow{ text-align:center; font-size:11.5px; font-weight:700; color:var(--slate-light); padding-bottom:6px; }
+  .cal-cell{
+    min-height:96px; border:1px solid var(--line); border-radius:10px; padding:6px 6px;
+    background:#fff; font-size:11px;
+  }
+  .cal-cell.empty{ background:transparent; border:none; }
+  .cal-cell.weekend{ background:#FAFAFB; }
+  .cal-cell.is-closed{ background:#F4F4F5; }
+  .cal-cell .dnum{ font-size:12px; font-weight:700; color:var(--slate); margin-bottom:4px; display:flex; align-items:center; justify-content:space-between; }
+  .closed-tag{ font-size:9px; font-weight:700; color:var(--danger); background:var(--danger-bg); border-radius:5px; padding:1px 5px; text-transform:uppercase; }
+  .cal-chip{
+    background:var(--navy); color:#fff; border-radius:6px; padding:2px 6px; margin-bottom:3px;
+    font-size:10.5px; font-weight:600; cursor:pointer; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .cal-chip:hover{ background:var(--gold-dark); }
+
+  /* ---------- table ---------- */
+  table.list-table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.list-table th{
+    text-align:left; padding:10px 12px; background:var(--navy); color:#fff;
+    font-weight:700; font-size:12.5px; letter-spacing:0.2px;
+  }
+  table.list-table th:first-child{ border-radius:8px 0 0 8px; }
+  table.list-table th:last-child{ border-radius:0 8px 8px 0; }
+  table.list-table td{ padding:11px 12px; border-bottom:1px solid var(--line); }
+  table.list-table tr:hover td{ background:#FAFAFB; }
+  .row-actions{ display:flex; gap:6px; }
+  .tag{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:12.5px; }
+
+  /* ---------- settings ---------- */
+  .settings-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-bottom:20px;}
+  .cap-item{ border:1.5px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .cap-item .t{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:13px; margin-bottom:6px;}
+  .cap-item input{ padding:8px 10px; font-size:13px; }
+  .section-title{ font-size:15px; font-weight:800; margin:0 0 4px; }
+  .section-desc{ font-size:13px; color:var(--slate); margin:0 0 16px; }
+  .divider{ height:1px; background:var(--line); margin:28px 0; }
+
+  /* ---------- modal ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(22,35,63,0.45); display:flex; align-items:center;
+    justify-content:center; z-index:50; padding:20px;
+  }
+  .modal{ background:#fff; border-radius:16px; padding:26px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,0.25); }
+  .modal h3{ margin:0 0 16px; font-size:17px; font-weight:800; }
+  .modal-actions{ display:flex; gap:10px; margin-top:18px; }
+
+  .empty-state{ text-align:center; padding:50px 20px; color:var(--slate); font-size:14px; }
+  .spin-wrap{ display:flex; align-items:center; justify-content:center; padding:80px 20px; color:var(--slate); font-size:14px;}
+
+  .copy-box{ display:flex; gap:8px; margin:6px 0 18px; }
+  .copy-box input{ flex:1; background:#F5F6F8; font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+  /* ---------- chat ---------- */
+  .chat-panel{ border:1.5px solid var(--line); border-radius:12px; overflow:hidden; margin:16px 0; }
+  .chat-thread{ max-height:280px; overflow-y:auto; padding:14px; background:#FAFBFC; display:flex; flex-direction:column; gap:8px; }
+  .chat-empty{ text-align:center; color:var(--slate-light); font-size:12.5px; padding:20px 0; }
+  .chat-bubble{ max-width:78%; padding:9px 13px; border-radius:14px; font-size:13.5px; line-height:1.45; word-break:break-word; }
+  .chat-bubble .t{ font-size:10px; opacity:0.65; margin-top:3px; }
+  .chat-bubble.mine{ align-self:flex-end; background:var(--navy); color:#fff; border-bottom-right-radius:4px; }
+  .chat-bubble.theirs{ align-self:flex-start; background:#fff; border:1px solid var(--line); color:var(--ink); border-bottom-left-radius:4px; }
+  .chat-bubble .who{ font-size:10.5px; font-weight:700; margin-bottom:2px; opacity:0.75; }
+  .chat-input-row{ display:flex; gap:8px; padding:10px; border-top:1.5px solid var(--line); background:#fff; }
+  .chat-input-row input{ flex:1; padding:10px 12px; border:1.5px solid var(--line); border-radius:9px; font-size:13.5px; font-family:inherit; }
+  .chat-input-row button{ width:auto; padding:10px 18px; }
+  .find-link{ background:none; border:none; color:var(--slate); font-size:13px; font-weight:600; text-decoration:underline; cursor:pointer; font-family:inherit; margin-top:14px; }
+
+  @media (max-width:600px){
+    .card{ padding:22px 18px; }
+    .topbar{ padding:14px 16px; }
+    .cal-cell{ min-height:70px; font-size:10px; }
+    table.list-table{ font-size:12px; }
+    .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"><div class="spin-wrap">Loading…</div></div>
+<script>
+/* ============================================================
+   Constants
+   ============================================================ */
+const CONFIG_KEY = 'app-config';
+const BOOKINGS_KEY = 'app-bookings';
+
+const SLOTS = [
+  {time:'08:15', period:'AM'},
+  {time:'08:45', period:'AM'},
+  {time:'09:15', period:'AM'},
+  {time:'09:45', period:'AM'},
+  {time:'10:15', period:'AM'},
+  {time:'12:00', period:'PM'},
+  {time:'12:30', period:'PM'},
+  {time:'13:00', period:'PM'},
+  {time:'13:30', period:'PM'},
+  {time:'14:00', period:'PM'},
+  {time:'14:30', period:'PM'},
+  {time:'15:00', period:'PM'},
+  {time:'15:30', period:'PM'},
+  {time:'16:00', period:'PM'},
+  {time:'16:30', period:'PM'},
+];
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const WEEKDAY_NUMS = [1,2,3,4,5]; // Mon..Fri (matches Date.getDay())
+function freshDayCapacity(){ return Object.fromEntries(SLOTS.map(s => [s.time, 1])); }
+const DEFAULT_CONFIG = {
+  applicantCode: 'WELCOME2026',
+  adminCode: 'ADMIN0000',
+  slotCapacity: Object.fromEntries(WEEKDAY_NUMS.map(d => [d, freshDayCapacity()])),
+  closedDates: []
+};
+
+/* ============================================================
+   In-memory state (resets on page reload — no localStorage used)
+   ============================================================ */
+let config = null;
+let bookings = [];
+let view = 'gate';          // 'gate' | 'book' | 'admin'
+let gateError = '';
+let gateBusy = false;
+
+let bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
+
+let adminTab = 'calendar';
+let calMonthOffset = 0;
+let datesMonthOffset = 0;
+let editingBooking = null;   // booking object being reassigned by admin
+let chatTarget = null;       // booking whose chat modal is open (admin side)
+let editDate = null, editTime = null, editError = '';
+let codeChangeState = { authCode:'', newApplicant:'', newAdmin:'', error:'', success:'', busy:false };
+let capacityDraft = null;
+let capacityDayTab = 1; // 1=Mon .. 5=Fri
+let capacitySaving = false;
+let capacitySaved = false;
+let cancelTarget = null; // booking pending cancel confirmation
+let listDateFilter = 'all';
+
+/* ============================================================
+   Storage adapter — backed by Google Apps Script + Google Sheets
+   (replaces Claude's window.storage; same get/set shape so the
+   rest of the app barely had to change)
+   ============================================================ */
+const API_URL = 'https://script.google.com/macros/s/AKfycbxlIvTWDp2P_VwrvT2tIAqPdPqPU8EYIRIJkIqJ1PnvDaBVeyhWp4HpVD6zK3jdS0Yp/exec';
+const API_SECRET = 'nhMCPE8a8fwGTmJXn4S9PBhSmnpfrBCy';
+
+const storage = {
+  async get(key){
+    const url = `${API_URL}?action=get&key=${encodeURIComponent(key)}&secret=${encodeURIComponent(API_SECRET)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error);
+    return { key: data.key, value: data.value };
+  },
+  async set(key, value){
+    // IMPORTANT: this must be a GET, not a POST. Apps Script's /exec URL always
+    // responds with a 302 redirect to the actual execution server, and browser
+    // fetch() silently converts a redirected POST into a GET — dropping the
+    // JSON body entirely. GET requests don't have this problem, so we pass
+    // everything (including the value) as URL query parameters instead.
+    const url = `${API_URL}?action=set&key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&secret=${encodeURIComponent(API_SECRET)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error);
+    return { key: data.key, ok: data.ok };
+  }
+};
+
+/* ============================================================
+   Storage helpers
+   ============================================================ */
+async function loadConfig(){
+  try{
+    const res = await storage.get(CONFIG_KEY);
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      const sc = parsed.slotCapacity || {};
+      const firstVal = Object.values(sc)[0];
+      const isOldFlatFormat = firstVal != null && typeof firstVal === 'number';
+      let merged = {};
+      if(isOldFlatFormat){
+        // migrate: old format was { time: cap } applied to every day
+        WEEKDAY_NUMS.forEach(d => { merged[d] = Object.assign({}, freshDayCapacity(), sc); });
+      } else {
+        WEEKDAY_NUMS.forEach(d => { merged[d] = Object.assign({}, freshDayCapacity(), sc[d] || {}); });
+      }
+      parsed.slotCapacity = merged;
+      parsed.closedDates = parsed.closedDates || [];
+      if(!parsed.adminCode) parsed.adminCode = DEFAULT_CONFIG.adminCode; // safety net if an in-progress login-based config was saved
+      config = parsed;
+    } else {
+      config = DEFAULT_CONFIG;
+      await storage.set(CONFIG_KEY, JSON.stringify(config));
+    }
+  }catch(e){
+    config = DEFAULT_CONFIG;
+    try{ await storage.set(CONFIG_KEY, JSON.stringify(config)); }catch(e2){}
+  }
+}
+async function saveConfig(next){
+  const previous = config;
+  config = next; // optimistic update for instant UI feedback
+  try{
+    await storage.set(CONFIG_KEY, JSON.stringify(config));
+  }catch(e){
+    config = previous; // roll back — the write didn't actually stick
+    throw e;
+  }
+}
+async function loadBookings(){
+  try{
+    const res = await storage.get(BOOKINGS_KEY);
+    bookings = (res && res.value) ? JSON.parse(res.value) : [];
+  }catch(e){
+    bookings = [];
+  }
+  return bookings;
+}
+async function saveBookings(next){
+  const previous = bookings;
+  bookings = next; // optimistic update for instant UI feedback
+  try{
+    await storage.set(BOOKINGS_KEY, JSON.stringify(bookings));
+  }catch(e){
+    bookings = previous; // roll back — the write didn't actually stick
+    throw e;
+  }
+}
+
+/* ============================================================
+   Chat helpers (per-booking message thread)
+   ============================================================ */
+async function sendChatMessage(bookingId, from, text){
+  const trimmed = (text||'').trim();
+  if(!trimmed) return null;
+  await loadBookings(); // fetch freshest data so we don't clobber messages from the other side
+  const idx = bookings.findIndex(b => b.id === bookingId);
+  if(idx === -1) return null;
+  const msg = { from, text: trimmed, at: new Date().toISOString() };
+  const updated = Object.assign({}, bookings[idx], { messages: [...(bookings[idx].messages||[]), msg] });
+  const next = [...bookings]; next[idx] = updated;
+  await saveBookings(next);
+  return updated;
+}
+function renderChatThread(messages, viewerRole){
+  const msgs = messages || [];
+  if(msgs.length === 0){
+    return `<div class="chat-empty">No messages yet. Say hello!</div>`;
+  }
+  return msgs.map(m => {
+    const mine = m.from === viewerRole;
+    const who = m.from === 'admin' ? 'Recruiter' : 'You (applicant)';
+    const time = new Date(m.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    return `<div class="chat-bubble ${mine?'mine':'theirs'}">
+      <div class="who">${mine ? 'You' : who}</div>
+      ${escapeHtml(m.text)}
+      <div class="t">${time}</div>
+    </div>`;
+  }).join('');
+}
+let chatPollBookingId = null;
+let chatPollTimer = null;
+function startChatPolling(bookingId, onTick){
+  if(chatPollBookingId === bookingId) return; // already polling this thread
+  stopChatPolling();
+  chatPollBookingId = bookingId;
+  chatPollTimer = setInterval(async () => {
+    await loadBookings();
+    onTick();
+  }, 8000);
+}
+function stopChatPolling(){
+  if(chatPollTimer) clearInterval(chatPollTimer);
+  chatPollTimer = null;
+  chatPollBookingId = null;
+}
+
+
+/* ============================================================
+   Date utilities
+   ============================================================ */
+function fmtDate(d){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function isWeekday(d){ const day=d.getDay(); return day>=1 && day<=5; }
+function upcomingWeekdays(count){
+  const out=[]; let cur=new Date(); cur.setHours(0,0,0,0); cur.setDate(cur.getDate()+1);
+  while(out.length < count){
+    if(isWeekday(cur)) out.push(new Date(cur));
+    cur.setDate(cur.getDate()+1);
+  }
+  return out;
+}
+function mondayOf(date){
+  const d = new Date(date); d.setHours(0,0,0,0);
+  const day = d.getDay();
+  const diff = (day===0 ? -6 : 1-day);
+  d.setDate(d.getDate()+diff);
+  return d;
+}
+function firstBookableMonday(){
+  const tomorrow = new Date(); tomorrow.setHours(0,0,0,0); tomorrow.setDate(tomorrow.getDate()+1);
+  return mondayOf(tomorrow);
+}
+function isDateClosed(dateStr){
+  return config && config.closedDates && config.closedDates.includes(dateStr);
+}
+function slotsUsed(date, time){
+  return bookings.filter(b => b.date===date && b.time===time).length;
+}
+function dowOfDateStr(dateStr){
+  const [y,m,d] = dateStr.split('-').map(Number);
+  return new Date(y, m-1, d).getDay();
+}
+function slotCapacityFor(dateStr, time){
+  const dow = dowOfDateStr(dateStr);
+  const dayMap = config && config.slotCapacity && config.slotCapacity[dow];
+  return (dayMap && dayMap[time] != null) ? dayMap[time] : 1;
+}
+function dateFull(dateStr){
+  return SLOTS.every(s => slotsUsed(dateStr, s.time) >= slotCapacityFor(dateStr, s.time));
+}
+function dateRemainingCount(dateStr){
+  return SLOTS.reduce((sum,s)=> sum + Math.max(0, slotCapacityFor(dateStr, s.time)-slotsUsed(dateStr,s.time)), 0);
+}
+function fmtDateLabel(dateStr){
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  return `${MONTHS_SHORT[m-1]} ${d} (${DOW[dt.getDay()]})`;
+}
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+function isValidFullName(v){ return v.trim().length>=2; }
+
+/* ============================================================
+   Root render
+   ============================================================ */
+function showNotionSelectOverlay(rows){
+  // Renders a REAL, visible HTML table and selects its contents using the browser's
+  // native Selection API — not a scripted clipboard write. The person then presses
+  // Ctrl+C themselves, which is the same mechanism as copying a table off any website
+  // into Excel/Notion. This sidesteps clipboard-permission issues entirely, because the
+  // actual copy step is a native, user-initiated browser action.
+  const existing = document.getElementById('notionSelectOverlay');
+  if(existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'notionSelectOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(22,35,63,0.55); z-index:999; display:flex; align-items:center; justify-content:center; padding:20px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff; border-radius:16px; padding:24px; max-width:720px; width:100%; max-height:80vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-weight:800; font-size:16px; margin-bottom:6px;';
+  title.textContent = 'Table selected — press Ctrl+C (Cmd+C on Mac) now';
+  card.appendChild(title);
+
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:12.5px; color:#5C6470; margin-bottom:14px;';
+  sub.textContent = 'Then close this box and paste into a new row in Notion (select the whole row first, not the Contact Date cell).';
+  card.appendChild(sub);
+
+  const table = document.createElement('table');
+  table.id = 'notionSelectTable';
+  table.style.cssText = 'border-collapse:collapse; width:100%; font-size:12.5px;';
+  rows.forEach(b => {
+    const tr = document.createElement('tr');
+    notionRowFields(b).forEach(val => {
+      const td = document.createElement('td');
+      td.style.cssText = 'border:1px solid #DADFE6; padding:6px 10px; white-space:nowrap;';
+      td.textContent = val;
+      tr.appendChild(td);
+    });
+    table.appendChild(tr);
+  });
+  card.appendChild(table);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close';
+  closeBtn.style.cssText = 'margin-top:16px; padding:10px 20px; border-radius:9px; border:1.5px solid #DADFE6; background:transparent; font-family:inherit; font-size:13.5px; cursor:pointer;';
+  closeBtn.onclick = () => overlay.remove();
+  card.appendChild(closeBtn);
+
+  overlay.appendChild(card);
+  overlay.onclick = (e) => { if(e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+
+  // Select the table's full contents automatically.
+  try{
+    const range = document.createRange();
+    range.selectNodeContents(table);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }catch(e){ /* if selection fails, the person can still manually drag-select the visible table */ }
+}
+
+function render(){
+  const app = document.getElementById('app');
+  if(view==='gate') app.innerHTML = renderGate();
+  else if(view==='book') app.innerHTML = renderTopbar(false) + renderBook();
+  else if(view==='admin') app.innerHTML = renderTopbar(true) + renderAdmin();
+  attachHandlers();
+}
+
+function renderTopbar(isAdmin){
+  return `
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">IV</div>
+      <div>
+        <div class="brand-name">Interview Scheduling</div>
+        <div class="brand-sub">${isAdmin ? 'Admin Console' : 'Applicant Booking'}</div>
+      </div>
+    </div>
+    <div class="right">
+      ${isAdmin ? '<span class="badge-admin">ADMIN</span>' : ''}
+      <button class="link-btn" id="logoutBtn">Exit</button>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   Gate screen
+   ============================================================ */
+
+let gateMode = 'code'; // 'code' | 'find'
+let findEmail = '';
+let findError = '';
+let findBusy = false;
+let foundBookingId = null;
+
+function renderGate(){
+  if(gateMode === 'find'){
+    return `
+    <div class="center-screen">
+      <div class="card gate-card">
+        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <h1 class="gate-title">Find Your Chat</h1>
+        <p class="gate-sub">Enter the email you used when booking to continue your chat.</p>
+        <div class="field">
+          <label for="findEmailInput">Email</label>
+          <input type="email" id="findEmailInput" placeholder="example@email.com" autocomplete="off" value="${escapeHtml(findEmail)}" ${findBusy?'disabled':''}>
+        </div>
+        <button class="btn btn-primary" id="findSubmit" ${findBusy?'disabled':''}>${findBusy?'Looking…':'Find My Chat'}</button>
+        ${findError ? `<div class="error-text">${escapeHtml(findError)}</div>` : ''}
+        <button class="find-link" id="gateSwitchToCode" style="display:block; margin-top:14px;">← Back to access code</button>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="center-screen">
+    <div class="card gate-card">
+      <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+      <h1 class="gate-title">Interview Scheduling</h1>
+      <p class="gate-sub">Please enter the access code you were given.</p>
+      <div class="field">
+        <label for="gateCode">Access Code</label>
+        <input type="text" id="gateCode" placeholder="Enter your code" autocomplete="off" ${gateBusy?'disabled':''}>
+      </div>
+      <button class="btn btn-primary" id="gateSubmit" ${gateBusy?'disabled':''}>${gateBusy?'Checking…':'Enter'}</button>
+      ${gateError ? `<div class="error-text">${escapeHtml(gateError)}</div>` : ''}
+      <button class="find-link" id="gateSwitchToFind">Already booked? Find your chat →</button>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   Applicant booking screens
+   ============================================================ */
+function renderBook(){
+  if(bk.done) return renderBookDone();
+  const stepHtml = bk.step===1 ? renderStepDate()
+                  : bk.step===2 ? renderStepTime()
+                  : renderStepInfo();
+  const pillClass = i => bk.step>i ? 'done' : (bk.step===i ? 'active' : '');
+  return `
+  <div class="main-wrap">
+    <div class="steps">
+      <div class="step-pill ${pillClass(1)}"></div>
+      <div class="step-pill ${pillClass(2)}"></div>
+      <div class="step-pill ${pillClass(3)}"></div>
+    </div>
+    <div class="card">${stepHtml}</div>
+  </div>`;
+}
+
+function renderStepDate(){
+  const firstMon = firstBookableMonday();
+  const viewMon = new Date(firstMon); viewMon.setDate(viewMon.getDate() + bk.weekOffset*7);
+  const weekDates = [0,1,2,3,4].map(i=>{ const d=new Date(viewMon); d.setDate(d.getDate()+i); return d; });
+  const tomorrow = new Date(); tomorrow.setHours(0,0,0,0); tomorrow.setDate(tomorrow.getDate()+1);
+
+  const cells = weekDates.map(d=>{
+    const ds = fmtDate(d);
+    const isPast = d < tomorrow;
+    const closed = isPast || isDateClosed(ds);
+    const full = !closed && dateFull(ds);
+    const remain = dateRemainingCount(ds);
+    const sel = bk.date===ds;
+    const blocked = closed || full;
+    const label = closed ? 'Closed' : (full ? 'Full' : remain+' left');
+    return `
+    <div class="date-btn week-cell ${sel?'selected':''} ${full?'full':''} ${closed?'closed':''}" data-date="${ds}" ${blocked?'':'data-clickable="1"'}>
+      <div class="dow">${DOW[d.getDay()]}</div>
+      <div class="dnum">${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}</div>
+      <div class="avail">${label}</div>
+    </div>`;
+  }).join('');
+
+  const rangeLabel = `${MONTHS_SHORT[weekDates[0].getMonth()]} ${weekDates[0].getDate()} – ${MONTHS_SHORT[weekDates[4].getMonth()]} ${weekDates[4].getDate()}, ${weekDates[4].getFullYear()}`;
+  const prevDisabled = bk.weekOffset<=0;
+  const nextDisabled = bk.weekOffset>=1;
+
+  return `
+  <div class="step-label">Step 1 of 3</div>
+  <h2 class="step-heading">Choose your interview date</h2>
+  <div class="week-nav">
+    <button class="btn btn-ghost btn-sm" id="weekPrev" ${prevDisabled?'disabled':''}>‹ Prev week</button>
+    <div class="week-range">${rangeLabel}</div>
+    <button class="btn btn-ghost btn-sm" id="weekNext" ${nextDisabled?'disabled':''}>Next week ›</button>
+  </div>
+  <div class="date-grid-week">${cells}</div>
+  <p class="hint" style="margin-top:10px;">Grayed-out days are not open for booking.</p>
+  <div style="margin-top:24px; display:flex; justify-content:flex-end;">
+    <button class="btn btn-gold" style="width:auto; padding:12px 28px;" id="dateNext" ${bk.date?'':'disabled'}>Next</button>
+  </div>`;
+}
+
+function renderStepTime(){
+  const ds = bk.date;
+  const morning = SLOTS.filter(s=>s.period==='AM');
+  const afternoon = SLOTS.filter(s=>s.period==='PM');
+  const slotBtn = s => {
+    const used = slotsUsed(ds, s.time);
+    const cap = slotCapacityFor(ds, s.time);
+    const full = used>=cap;
+    const sel = bk.time===s.time;
+    return `<div class="slot-btn ${sel?'selected':''} ${full?'full':''}" data-time="${s.time}" ${full?'':'data-clickable="1"'}>
+      ${s.time}
+      <div class="cap">${full?'Full':(cap-used)+' left'}</div>
+    </div>`;
+  };
+  return `
+  <div class="step-label">Step 2 of 3</div>
+  <h2 class="step-heading">${fmtDateLabel(ds)} — choose a time</h2>
+  <div class="slot-section-label">AM · PH time</div>
+  <div class="slot-grid">${morning.map(slotBtn).join('')}</div>
+  <div class="slot-section-label">PM · PH time</div>
+  <div class="slot-grid">${afternoon.map(slotBtn).join('')}</div>
+  <div style="margin-top:24px; display:flex; justify-content:space-between;">
+    <button class="btn btn-ghost" style="width:auto; padding:12px 20px;" id="timeBack">Back</button>
+    <button class="btn btn-gold" style="width:auto; padding:12px 28px;" id="timeNext" ${bk.time?'':'disabled'}>Next</button>
+  </div>`;
+}
+
+function renderStepInfo(){
+  const nameValid = isValidFullName(bk.fullName);
+  const canSubmit = nameValid && isValidEmail(bk.email.trim()) && bk.agree1 && bk.agree2 && !bk.busy;
+  return `
+  <div class="step-label">Step 3 of 3</div>
+  <h2 class="step-heading">Your information</h2>
+  <div style="background:var(--paper); border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:13.5px; font-weight:600; color:var(--slate);">
+    Selected slot · <span class="tag">${fmtDateLabel(bk.date)} ${bk.time} PH time</span>
+  </div>
+  <div class="field">
+    <label for="fullNameInput">Full Name</label>
+    <input type="text" id="fullNameInput" placeholder="Enter your full name" value="${escapeHtml(bk.fullName)}">
+  </div>
+  <div class="field">
+    <label for="emailInput">Email</label>
+    <input type="email" id="emailInput" placeholder="example@email.com" value="${escapeHtml(bk.email)}">
+  </div>
+
+  <div class="warn-box strong">
+    <div class="icon">⚠️</div>
+    <div class="txt">After booking, please send us a message in the chat right here on this page. If we do not hear from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled. I acknowledge this.</div>
+  </div>
+  <div class="agree-row">
+    <input type="checkbox" id="agree1" ${bk.agree1?'checked':''}>
+    <label class="agree-txt" for="agree1">I have read and agree to the above.</label>
+  </div>
+
+  <div class="warn-box" style="margin-top:18px;">
+    <div class="icon">📌</div>
+    <div class="txt">Rescheduling is <u>not available</u> after booking. Please choose a time you are certain you can attend.</div>
+  </div>
+  <div class="agree-row">
+    <input type="checkbox" id="agree2" ${bk.agree2?'checked':''}>
+    <label class="agree-txt" for="agree2">I understand rescheduling is not possible and have chosen carefully.</label>
+  </div>
+
+  ${bk.error ? `<div class="error-text">${escapeHtml(bk.error)}</div>` : ''}
+
+  <div style="margin-top:24px; display:flex; justify-content:space-between;">
+    <button class="btn btn-ghost" style="width:auto; padding:12px 20px;" id="infoBack" ${bk.busy?'disabled':''}>Back</button>
+    <button class="btn btn-gold" style="width:auto; padding:12px 28px;" id="infoSubmit" ${canSubmit?'':'disabled'}>${bk.busy?'Booking…':'Confirm Booking'}</button>
+  </div>`;
+}
+
+function renderBookDone(){
+  return `
+  <div class="main-wrap">
+    <div class="card">
+      <div class="ticket">
+        <div class="ticket-eyebrow">Booking Confirmed · Interview Slip</div>
+        <div class="ticket-name">${escapeHtml(bk.fullName)}</div>
+        <div class="ticket-row"><span class="k">Date</span><span class="v">${fmtDateLabel(bk.date)}</span></div>
+        <div class="ticket-row"><span class="k">Time</span><span class="v">${bk.time} PH time</span></div>
+        <div class="ticket-row"><span class="k">Email</span><span class="v" style="font-size:12.5px;">${escapeHtml(bk.email)}</span></div>
+      </div>
+
+      <h3 style="font-size:16px; font-weight:800; margin:26px 0 4px;">One last step: confirm your booking</h3>
+      <p style="font-size:13px; color:var(--slate); margin:0 0 12px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>
+
+      ${renderChatPanel(bk.id, 'applicant')}
+
+      <div class="warn-box strong" style="margin-top:16px;">
+        <div class="icon">⏰</div>
+        <div class="txt">If we do not receive a message from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled.</div>
+      </div>
+      <p class="hint" style="margin-top:10px;">Want to come back to this chat later? Use "Already booked? Find your chat" on the main entry page — you'll just need the email you booked with.</p>
+      <button class="btn btn-ghost" style="margin-top:16px;" id="doneClose">Done</button>
+    </div>
+  </div>`;
+}
+
+function renderChatPanel(bookingId, viewerRole){
+  const b = bookings.find(x => x.id === bookingId);
+  const messages = b ? (b.messages||[]) : [];
+  return `
+  <div class="chat-panel">
+    <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole)}</div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Type a message…" autocomplete="off">
+      <button class="btn btn-gold" id="chatSendBtn">Send</button>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   Admin screens
+   ============================================================ */
+function renderAdmin(){
+  const tabs = [
+    ['calendar','Calendar'],
+    ['list','List'],
+    ['dates','Availability'],
+    ['capacity','Slot Settings'],
+    ['codes','Access Codes'],
+  ];
+  const tabsHtml = tabs.map(([k,label]) =>
+    `<div class="admin-tab ${adminTab===k?'active':''}" data-tab="${k}">${label}</div>`
+  ).join('');
+
+  let body = '';
+  if(adminTab==='calendar') body = renderAdminCalendar();
+  else if(adminTab==='list') body = renderAdminList();
+  else if(adminTab==='dates') body = renderAdminDates();
+  else if(adminTab==='capacity') body = renderAdminCapacity();
+  else if(adminTab==='codes') body = renderAdminCodes();
+
+  return `
+  <div class="admin-wrap">
+    <div class="admin-tabs">${tabsHtml}</div>
+    ${body}
+    ${editingBooking ? renderEditModal() : ''}
+    ${cancelTarget ? renderCancelModal() : ''}
+    ${chatTarget ? renderAdminChatModal() : ''}
+  </div>`;
+}
+
+function monthMatrix(year, month){
+  const first = new Date(year, month, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const cells = [];
+  for(let i=0;i<startDow;i++) cells.push(null);
+  for(let d=1; d<=daysInMonth; d++) cells.push(d);
+  while(cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+function renderAdminCalendar(){
+  const base = new Date();
+  base.setMonth(base.getMonth()+calMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const cells = monthMatrix(year, month);
+  const dowHtml = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  const cellsHtml = cells.map(d=>{
+    if(d===null) return `<div class="cal-cell empty"></div>`;
+    const dt = new Date(year, month, d);
+    const ds = fmtDate(dt);
+    const weekend = dt.getDay()===0 || dt.getDay()===6;
+    const closed = isDateClosed(ds);
+    const dayBookings = bookings.filter(b=>b.date===ds).sort((a,b)=> a.time.localeCompare(b.time));
+    const chips = dayBookings.slice(0,4).map(b=>
+      `<span class="cal-chip" data-edit-id="${b.id}" title="${escapeHtml(b.fullName)} ${b.time}">${b.time} ${escapeHtml(b.fullName)}</span>`
+    ).join('');
+    const more = dayBookings.length>4 ? `<div style="font-size:10px;color:var(--slate-light);">+${dayBookings.length-4} more</div>` : '';
+    return `<div class="cal-cell ${weekend?'weekend':''} ${closed?'is-closed':''}">
+      <div class="dnum"><span>${d}</span>${closed?'<span class="closed-tag">Closed</span>':''}</div>
+      ${chips}${more}
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="cal-header">
+      <button class="btn btn-ghost btn-sm" id="calPrev">‹ Prev</button>
+      <div class="cal-title">${MONTHS[month]} ${year}</div>
+      <button class="btn btn-ghost btn-sm" id="calNext">Next ›</button>
+    </div>
+    <div class="cal-grid">${dowHtml}${cellsHtml}</div>
+    <p style="font-size:12px; color:var(--slate-light); margin-top:14px;">Click a name to reassign or cancel that booking.</p>
+  </div>`;
+}
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function toUSDate(y,m,d){ return `${pad2(m)}/${pad2(d)}/${y}`; }
+function notionRowFields(b){
+  const c = new Date(b.bookedAt);
+  const contactDateStr = toUSDate(c.getFullYear(), c.getMonth()+1, c.getDate());
+  const [dy,dm,dd] = b.date.split('-').map(Number);
+  const demoDateStr = toUSDate(dy, dm, dd);
+  // Column order matches the Notion "1st Demo" tracker: Contact Date, Stage, 1st Demo P/F, Name, Status, Assign, 1st Demo Date, Time
+  return [contactDateStr, '1st Demo', '', b.fullName, 'Not confirmed yet', '', demoDateStr, b.time + ' PHT'];
+}
+function renderAdminList(){
+  const allDates = Array.from(new Set(bookings.map(b=>b.date))).sort();
+  const filtered = listDateFilter==='all' ? bookings : bookings.filter(b=>b.date===listDateFilter);
+  const rows = [...filtered].sort((a,b)=>{
+    const key = x => x.date + ' ' + x.time;
+    return key(a).localeCompare(key(b));
+  });
+  const filterOptions = `<option value="all" ${listDateFilter==='all'?'selected':''}>All dates (${bookings.length})</option>` +
+    allDates.map(ds => {
+      const count = bookings.filter(b=>b.date===ds).length;
+      return `<option value="${ds}" ${listDateFilter===ds?'selected':''}>${fmtDateLabel(ds)} (${count})</option>`;
+    }).join('');
+  const filterBar = `
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+    <label style="margin:0; white-space:nowrap;">Filter by date</label>
+    <select id="listDateFilterSelect" style="max-width:260px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      ${filterOptions}
+    </select>
+    <button class="btn btn-primary btn-sm" id="copyNotionBtn" style="margin-left:auto;" ${rows.length===0?'disabled':''}>📋 Copy for Notion</button>
+  </div>
+  <p class="hint" style="margin:-8px 0 16px;">Opens a box with the rows below (respecting the date filter) already selected — press <strong>Ctrl+C</strong> (Cmd+C on Mac), close the box, then in Notion click <strong>+ New</strong> for a blank row, hover its left edge and click the checkbox to <strong>select the whole row</strong> (not the Contact Date cell, which opens a date picker), then paste (Ctrl+V / Cmd+V).</p>`;
+  if(rows.length===0){
+    return `<div class="card">${filterBar}<div class="empty-state">No bookings ${listDateFilter==='all'?'yet':'for this date'}.</div></div>`;
+  }
+  const trs = rows.map(b => {
+    const msgCount = (b.messages||[]).length;
+    return `
+    <tr>
+      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td class="tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
+      <td class="tag">${fmtDateLabel(b.date)}</td>
+      <td class="tag">${b.time}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${msgCount>0?` (${msgCount})`:''}</button>
+          <button class="btn btn-ghost btn-sm" data-edit-id="${b.id}">Change</button>
+          <button class="btn btn-danger-outline btn-sm" data-cancel-id="${b.id}">Cancel</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="card">
+    ${filterBar}
+    <table class="list-table">
+      <thead><tr><th>Applicant</th><th>Booked At</th><th>Date</th><th>Time (PH)</th><th>Manage</th></tr></thead>
+      <tbody>${trs}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderAdminDates(){
+  const base = new Date();
+  base.setMonth(base.getMonth()+datesMonthOffset);
+  const start = new Date(base.getFullYear(), base.getMonth(), 1);
+  const dates = [];
+  let cur = new Date(); cur.setHours(0,0,0,0); cur.setDate(cur.getDate()+1);
+  // Show 28 upcoming weekdays regardless of month paging (simpler + always relevant)
+  while(dates.length < 28){
+    if(isWeekday(cur)) dates.push(new Date(cur));
+    cur.setDate(cur.getDate()+1);
+  }
+  const cells = dates.map(d=>{
+    const ds = fmtDate(d);
+    const closed = isDateClosed(ds);
+    const remain = dateRemainingCount(ds);
+    return `
+    <div class="date-btn ${closed?'closed':''}" data-toggle-date="${ds}" style="cursor:pointer;">
+      <div class="dow">${DOW[d.getDay()]}</div>
+      <div class="dnum">${MONTHS_SHORT[d.getMonth()]} ${d.getDate()}</div>
+      <div class="avail">${closed ? 'Closed — click to open' : remain+' left — click to close'}</div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="card">
+    <div class="section-title">Open / Close Dates</div>
+    <div class="section-desc">Click any date to open or close it for booking. Closed dates are shown as unavailable to applicants, the same way weekends are hidden.</div>
+    <div class="date-grid">${cells}</div>
+  </div>`;
+}
+
+function renderAdminCapacity(){
+  if(!capacityDraft) capacityDraft = JSON.parse(JSON.stringify(config.slotCapacity));
+  const dayTabsHtml = WEEKDAY_NUMS.map(d => `
+    <div class="admin-tab ${capacityDayTab===d?'active':''}" data-cap-day-tab="${d}" style="padding:9px 14px; font-size:13px;">${DOW[d]}</div>
+  `).join('');
+  const dayCap = capacityDraft[capacityDayTab];
+  const items = SLOTS.map(s => `
+    <div class="cap-item">
+      <div class="t">${s.time} <span style="color:var(--slate-light); font-weight:500;">(${s.period} · PH time)</span></div>
+      <input type="number" min="0" max="99" data-cap-time="${s.time}" value="${dayCap[s.time]}">
+    </div>`).join('');
+  return `
+  <div class="card">
+    <div class="section-title">Seats per Slot, by Day</div>
+    <div class="section-desc">Weekday slots run 8:15–10:15 AM and 12:00–4:30 PM in 30-minute increments. Set capacity separately for each weekday — pick a day below, then adjust its slots. Changes to all 5 days are saved together.</div>
+    <div class="admin-tabs" style="margin-bottom:18px; border-bottom:1.5px solid var(--line); padding-bottom:0;">${dayTabsHtml}</div>
+    <div class="settings-grid">${items}</div>
+    <button class="btn btn-primary" style="width:auto; padding:12px 26px;" id="capSaveBtn">${capacitySaving?'Saving…':'Save Changes (all days)'}</button>
+    ${capacitySaved ? `<span class="success-text" style="margin-left:12px;">Saved.</span>` : ''}
+  </div>`;
+}
+
+function renderAdminCodes(){
+  const s = codeChangeState;
+  return `
+  <div class="card">
+    <div class="section-title">Change Access Codes</div>
+    <div class="section-desc">To change either code, first verify your identity with the current admin code.</div>
+
+    <div class="field">
+      <label>Current Admin Code (verification)</label>
+      <input type="password" id="authCodeInput" placeholder="Enter current admin code" value="${escapeHtml(s.authCode)}">
+    </div>
+    <div class="divider"></div>
+    <div class="field">
+      <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.applicantCode)})</span></label>
+      <input type="text" id="newApplicantInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newApplicant)}">
+    </div>
+    <div class="field">
+      <label>New Admin Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.adminCode)})</span></label>
+      <input type="text" id="newAdminInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newAdmin)}">
+    </div>
+    ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
+    ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
+    <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
+  </div>`;
+}
+
+function renderEditModal(){
+  const b = editingBooking;
+  const dates = upcomingWeekdays(28);
+  if(!editDate) editDate = b.date;
+  const dateOptions = dates.map(d=>{
+    const ds = fmtDate(d);
+    return `<option value="${ds}" ${editDate===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
+  }).join('');
+  const currentInList = dates.some(d=>fmtDate(d)===b.date);
+  const extraOption = currentInList ? '' : `<option value="${b.date}" selected>${fmtDateLabel(b.date)} (existing)</option>`;
+
+  const timeOptions = SLOTS.map(s=>{
+    const used = slotsUsed(editDate, s.time) - ((editDate===b.date && s.time===b.time) ? 1 : 0);
+    const cap = slotCapacityFor(editDate, s.time);
+    const full = used >= cap;
+    return `<option value="${s.time}" ${editTime===s.time?'selected':''} ${full && !(editDate===b.date && s.time===b.time) ? 'disabled':''}>${s.time} ${full?'(Full)':''}</option>`;
+  }).join('');
+
+  return `
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <h3>Reassign ${escapeHtml(b.fullName)}'s slot</h3>
+      <div class="field">
+        <label>Date</label>
+        <select id="editDateSelect" style="width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit;">
+          ${extraOption}${dateOptions}
+        </select>
+      </div>
+      <div class="field">
+        <label>Time</label>
+        <select id="editTimeSelect" style="width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit;">
+          ${timeOptions}
+        </select>
+      </div>
+      ${editError ? `<div class="error-text">${escapeHtml(editError)}</div>` : ''}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="editCancelBtn">Close</button>
+        <button class="btn btn-primary" id="editSaveBtn">Save</button>
+      </div>
+      <div class="divider" style="margin:18px 0;"></div>
+      <button class="btn btn-danger-outline" id="editDeleteBtn">Cancel this booking</button>
+    </div>
+  </div>`;
+}
+
+function renderCancelModal(){
+  const b = cancelTarget;
+  return `
+  <div class="modal-overlay" id="cancelModalOverlay">
+    <div class="modal">
+      <h3>Cancel this booking?</h3>
+      <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:0 0 4px;">
+        This will permanently remove <strong>${escapeHtml(b.fullName)}</strong>'s reservation for
+        <strong>${fmtDateLabel(b.date)} at ${b.time}</strong>. This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancelNoBtn">Keep booking</button>
+        <button class="btn btn-danger-outline" id="cancelYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, cancel it</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAdminChatModal(){
+  const b = bookings.find(x => x.id === chatTarget.id) || chatTarget;
+  return `
+  <div class="modal-overlay" id="chatModalOverlay">
+    <div class="modal" style="max-width:460px;">
+      <h3>${escapeHtml(b.fullName)} — ${fmtDateLabel(b.date)} ${b.time}</h3>
+      ${renderChatPanel(b.id, 'admin')}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="chatModalCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   Event binding
+   ============================================================ */
+function attachHandlers(){
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => document.querySelectorAll(sel);
+
+  const logoutBtn = $('#logoutBtn');
+  if(logoutBtn) logoutBtn.onclick = () => {
+    stopChatPolling();
+    view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
+    bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
+    render();
+  };
+
+  if(view==='gate'){
+    if(gateMode==='code'){
+      const submit = async () => {
+        const val = $('#gateCode').value.trim();
+        if(!val){ gateError='Please enter a code.'; render(); return; }
+        gateBusy = true; gateError=''; render();
+        await loadBookings();
+        if(val === config.adminCode){
+          view='admin'; gateBusy=false; render();
+        } else if(val === config.applicantCode){
+          view='book'; gateBusy=false; render();
+        } else {
+          gateBusy=false; gateError='That code is not valid.'; render();
+        }
+      };
+      $('#gateSubmit').onclick = submit;
+      $('#gateCode').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#gateCode').focus();
+      const findLink = $('#gateSwitchToFind');
+      if(findLink) findLink.onclick = () => { gateMode='find'; findError=''; render(); };
+    } else {
+      const submit = async () => {
+        const email = $('#findEmailInput').value.trim();
+        if(!email){ findError='Please enter your email.'; render(); return; }
+        findBusy = true; findError=''; findEmail = email; render();
+        await loadBookings();
+        const match = bookings.find(b => b.email.trim().toLowerCase() === email.toLowerCase());
+        if(!match){
+          findBusy=false; findError='No booking found for that email.'; render(); return;
+        }
+        bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
+               agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
+        findBusy=false; view='book'; render();
+      };
+      $('#findSubmit').onclick = submit;
+      $('#findEmailInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#findEmailInput').oninput = e => { findEmail = e.target.value; };
+      $('#findEmailInput').focus();
+      const backLink = $('#gateSwitchToCode');
+      if(backLink) backLink.onclick = () => { gateMode='code'; findError=''; render(); };
+    }
+  }
+
+  if(view==='book' && !bk.done){
+    if(bk.step===1){
+      $$('.date-btn[data-clickable="1"]').forEach(el=>{
+        el.onclick = () => { bk.date = el.dataset.date; render(); };
+      });
+      const next = $('#dateNext');
+      if(next) next.onclick = () => { bk.step=2; render(); };
+      const wPrev = $('#weekPrev');
+      if(wPrev) wPrev.onclick = () => { if(bk.weekOffset>0){ bk.weekOffset--; bk.date=null; render(); } };
+      const wNext = $('#weekNext');
+      if(wNext) wNext.onclick = () => { if(bk.weekOffset<1){ bk.weekOffset++; bk.date=null; render(); } };
+    }
+    if(bk.step===2){
+      $$('.slot-btn[data-clickable="1"]').forEach(el=>{
+        el.onclick = () => { bk.time = el.dataset.time; render(); };
+      });
+      $('#timeBack').onclick = () => { bk.step=1; render(); };
+      const next = $('#timeNext');
+      if(next) next.onclick = () => { bk.step=3; render(); };
+    }
+    if(bk.step===3){
+      $('#fullNameInput').oninput = e => { bk.fullName = e.target.value; };
+      $('#emailInput').oninput = e => { bk.email = e.target.value; };
+      $('#agree1').onchange = e => { bk.agree1 = e.target.checked; render(); };
+      $('#agree2').onchange = e => { bk.agree2 = e.target.checked; render(); };
+      $('#infoBack').onclick = () => { bk.step=2; render(); };
+      const submit = $('#infoSubmit');
+      if(submit) submit.onclick = async () => {
+        bk.error=''; bk.busy=true; render();
+        const MAX_ATTEMPTS = 4;
+        let attempt = 0;
+        let success = false;
+        let newBooking = null;
+        try{
+          while(attempt < MAX_ATTEMPTS && !success){
+            attempt++;
+            await loadBookings();
+            const emailNorm = bk.email.trim().toLowerCase();
+            const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm);
+            if(dupEmail){
+              bk.busy=false; bk.error='This email address has already been used to book a slot. Only one booking is allowed per person.'; render(); return;
+            }
+            if(isDateClosed(bk.date)){
+              bk.busy=false; bk.error='This date was just closed by the organizer. Please pick another date.'; bk.step=1; bk.date=null; bk.time=null; render(); return;
+            }
+            const used = slotsUsed(bk.date, bk.time);
+            const cap = slotCapacityFor(bk.date, bk.time);
+            if(used >= cap){
+              bk.busy=false; bk.error='Sorry, another applicant just booked this time. Please choose another slot.'; bk.step=2; bk.time=null; render(); return;
+            }
+            newBooking = {
+              id: 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+              fullName: bk.fullName.trim(),
+              email: bk.email.trim(),
+              date: bk.date,
+              time: bk.time,
+              bookedAt: new Date().toISOString(),
+              messages: []
+            };
+            await saveBookings([...bookings, newBooking]);
+            // Verify the write actually stuck — the shared storage is "last write wins",
+            // so if someone else wrote in the same instant, our booking (or theirs) could
+            // have been silently clobbered. Re-read and confirm before declaring success.
+            await loadBookings();
+            const stillThere = bookings.some(b => b.id === newBooking.id);
+            const countForSlot = slotsUsed(newBooking.date, newBooking.time);
+            if(stillThere && countForSlot <= cap){
+              success = true;
+            }
+            // otherwise loop and retry from a fresh read
+          }
+          bk.busy=false;
+          if(success){
+            bk.id = newBooking.id; bk.done=true; render();
+          } else {
+            bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
+          }
+        }catch(e){
+          bk.busy=false; bk.error='Something went wrong while booking. Please try again.'; render();
+        }
+      };
+    }
+  }
+
+  if(view==='book' && bk.done){
+    const chatInput = $('#chatInput');
+    const chatSendBtn = $('#chatSendBtn');
+    const doSend = async () => {
+      if(!chatInput) return;
+      const text = chatInput.value;
+      if(!text.trim()) return;
+      chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
+      await sendChatMessage(bk.id, 'applicant', text);
+      chatInput.value='';
+      chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
+      render();
+      const thread = document.getElementById('chatThread');
+      if(thread) thread.scrollTop = thread.scrollHeight;
+      chatInput.focus();
+    };
+    if(chatSendBtn) chatSendBtn.onclick = doSend;
+    if(chatInput){
+      chatInput.addEventListener('keydown', e => { if(e.key==='Enter') doSend(); });
+      const thread = document.getElementById('chatThread');
+      if(thread) thread.scrollTop = thread.scrollHeight;
+    }
+    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) render(); });
+    const doneClose = $('#doneClose');
+    if(doneClose) doneClose.onclick = () => {
+      stopChatPolling();
+      bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
+      render();
+    };
+  }
+
+  if(view==='admin'){
+    $$('.admin-tab').forEach(el=>{
+      el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+    });
+
+    if(adminTab==='calendar'){
+      $('#calPrev').onclick = () => { calMonthOffset--; render(); };
+      $('#calNext').onclick = () => { calMonthOffset++; render(); };
+      $$('[data-edit-id]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset.editId;
+          editingBooking = bookings.find(b=>b.id===id);
+          editDate = editingBooking.date; editTime = editingBooking.time; editError='';
+          render();
+        };
+      });
+    }
+
+    if(adminTab==='list'){
+      const filterSel = $('#listDateFilterSelect');
+      if(filterSel) filterSel.onchange = e => { listDateFilter = e.target.value; render(); };
+      const copyBtn = $('#copyNotionBtn');
+      if(copyBtn) copyBtn.onclick = () => {
+        const filtered = listDateFilter==='all' ? bookings : bookings.filter(b=>b.date===listDateFilter);
+        const sorted = [...filtered].sort((a,b)=>{
+          const key = x => x.date + ' ' + x.time;
+          return key(a).localeCompare(key(b));
+        });
+        showNotionSelectOverlay(sorted);
+      };
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          render();
+        };
+      });
+      $$('[data-edit-id]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset.editId;
+          editingBooking = bookings.find(b=>b.id===id);
+          editDate = editingBooking.date; editTime = editingBooking.time; editError='';
+          render();
+        };
+      });
+      $$('[data-cancel-id]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset.cancelId;
+          cancelTarget = bookings.find(x=>x.id===id);
+          render();
+        };
+      });
+    }
+
+    if(adminTab==='dates'){
+      $$('[data-toggle-date]').forEach(el=>{
+        el.onclick = async () => {
+          const ds = el.dataset.toggleDate;
+          const next = Object.assign({}, config);
+          const set = new Set(next.closedDates || []);
+          if(set.has(ds)) set.delete(ds); else set.add(ds);
+          next.closedDates = Array.from(set);
+          await saveConfig(next);
+          render();
+        };
+      });
+    }
+
+    if(adminTab==='capacity'){
+      $$('[data-cap-day-tab]').forEach(el=>{
+        el.onclick = () => { capacityDayTab = parseInt(el.dataset.capDayTab,10); capacitySaved=false; render(); };
+      });
+      $$('[data-cap-time]').forEach(el=>{
+        el.oninput = e => { capacityDraft[capacityDayTab][el.dataset.capTime] = Math.max(0, parseInt(e.target.value||'0',10)); };
+      });
+      $('#capSaveBtn').onclick = async () => {
+        capacitySaving = true; render();
+        await saveConfig(Object.assign({}, config, { slotCapacity: capacityDraft }));
+        capacitySaving = false; capacitySaved = true; render();
+      };
+    }
+
+    if(adminTab==='codes'){
+      $('#authCodeInput').oninput = e => { codeChangeState.authCode = e.target.value; };
+      $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
+      $('#newAdminInput').oninput = e => { codeChangeState.newAdmin = e.target.value; };
+      $('#codeSaveBtn').onclick = async () => {
+        const s = codeChangeState;
+        s.error=''; s.success='';
+        if(s.authCode !== config.adminCode){
+          s.error = 'Current admin code does not match.'; render(); return;
+        }
+        if(!s.newApplicant.trim() && !s.newAdmin.trim()){
+          s.error = 'Enter at least one new code to change.'; render(); return;
+        }
+        s.busy = true; render();
+        const next = Object.assign({}, config);
+        if(s.newApplicant.trim()) next.applicantCode = s.newApplicant.trim();
+        if(s.newAdmin.trim()) next.adminCode = s.newAdmin.trim();
+        await saveConfig(next);
+        s.busy=false; s.success='Codes updated successfully.'; s.authCode=''; s.newApplicant=''; s.newAdmin='';
+        render();
+      };
+    }
+
+    if(editingBooking){
+      $('#editDateSelect').onchange = e => { editDate = e.target.value; render(); };
+      $('#editTimeSelect').onchange = e => { editTime = e.target.value; };
+      $('#editCancelBtn').onclick = () => { editingBooking=null; editError=''; render(); };
+      $('#modalOverlay').onclick = (e) => { if(e.target.id==='modalOverlay'){ editingBooking=null; editError=''; render(); } };
+      $('#editDeleteBtn').onclick = () => {
+        cancelTarget = editingBooking;
+        editingBooking = null; editError='';
+        render();
+      };
+      $('#editSaveBtn').onclick = async () => {
+        const sel = document.getElementById('editTimeSelect');
+        const newTime = sel.value;
+        await loadBookings();
+        const used = bookings.filter(x=>x.date===editDate && x.time===newTime && x.id!==editingBooking.id).length;
+        const cap = slotCapacityFor(editDate, newTime);
+        if(used >= cap){
+          editError = 'That time is already full.'; render(); return;
+        }
+        const idx = bookings.findIndex(x=>x.id===editingBooking.id);
+        const updated = Object.assign({}, bookings[idx], { date: editDate, time: newTime });
+        const next = [...bookings]; next[idx] = updated;
+        await saveBookings(next);
+        editingBooking=null; editError='';
+        render();
+      };
+    }
+
+    if(cancelTarget){
+      $('#cancelNoBtn').onclick = () => { cancelTarget=null; render(); };
+      $('#cancelModalOverlay').onclick = (e) => { if(e.target.id==='cancelModalOverlay'){ cancelTarget=null; render(); } };
+      $('#cancelYesBtn').onclick = async () => {
+        const id = cancelTarget.id;
+        await loadBookings();
+        await saveBookings(bookings.filter(x=>x.id!==id));
+        cancelTarget = null;
+        render();
+      };
+    }
+
+    if(chatTarget){
+      const chatInput = $('#chatInput');
+      const chatSendBtn = $('#chatSendBtn');
+      const doSend = async () => {
+        if(!chatInput) return;
+        const text = chatInput.value;
+        if(!text.trim()) return;
+        chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
+        const updated = await sendChatMessage(chatTarget.id, 'admin', text);
+        if(updated) chatTarget = updated;
+        chatInput.value='';
+        chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
+        render();
+        const thread = document.getElementById('chatThread');
+        if(thread) thread.scrollTop = thread.scrollHeight;
+        const freshInput = document.getElementById('chatInput');
+        if(freshInput) freshInput.focus();
+      };
+      if(chatSendBtn) chatSendBtn.onclick = doSend;
+      if(chatInput){
+        chatInput.addEventListener('keydown', e => { if(e.key==='Enter') doSend(); });
+      }
+      const thread = document.getElementById('chatThread');
+      if(thread) thread.scrollTop = thread.scrollHeight;
+      $('#chatModalCloseBtn').onclick = () => { stopChatPolling(); chatTarget=null; render(); };
+      $('#chatModalOverlay').onclick = (e) => { if(e.target.id==='chatModalOverlay'){ stopChatPolling(); chatTarget=null; render(); } };
+      startChatPolling(chatTarget.id, () => {
+        if(chatTarget){
+          const fresh = bookings.find(b=>b.id===chatTarget.id);
+          if(fresh) chatTarget = fresh;
+          render();
+        }
+      });
+    } else {
+      // Only stop polling here if nothing else on the admin side needs it —
+      // the applicant chat view manages its own start/stop independently.
+      if(chatPollBookingId && adminTab==='list') stopChatPolling();
+    }
+  }
+}
+
+/* ============================================================
+   Init
+   ============================================================ */
+(async function init(){
+  await loadConfig();
+  await loadBookings();
+  render();
+})();
+</script>
+</body>
+</html>
