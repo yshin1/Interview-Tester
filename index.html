@@ -1367,13 +1367,14 @@ function attachHandlers(){
       const submit = $('#infoSubmit');
       if(submit) submit.onclick = async () => {
         bk.error=''; bk.busy=true; render();
-        const MAX_ATTEMPTS = 4;
+        const MAX_ATTEMPTS = 5;
         let attempt = 0;
         let success = false;
         let newBooking = null;
-        try{
-          while(attempt < MAX_ATTEMPTS && !success){
-            attempt++;
+        let lastErrorWasNetwork = false;
+        while(attempt < MAX_ATTEMPTS && !success){
+          attempt++;
+          try{
             await loadBookings();
             const emailNorm = bk.email.trim().toLowerCase();
             const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm);
@@ -1409,16 +1410,23 @@ function attachHandlers(){
             if(stillThere && countForSlot <= cap){
               success = true;
             }
+            lastErrorWasNetwork = false;
             // otherwise loop and retry from a fresh read
+          }catch(e){
+            // A transient network/server hiccup (e.g. the backend being briefly
+            // overloaded) — don't give up immediately, wait a beat and retry
+            // rather than showing an error on the very first blip.
+            lastErrorWasNetwork = true;
+            await new Promise(r => setTimeout(r, 700));
           }
-          bk.busy=false;
-          if(success){
-            bk.id = newBooking.id; bk.done=true; render();
-          } else {
-            bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
-          }
-        }catch(e){
-          bk.busy=false; bk.error='Something went wrong while booking. Please try again.'; render();
+        }
+        bk.busy=false;
+        if(success){
+          bk.id = newBooking.id; bk.done=true; render();
+        } else if(lastErrorWasNetwork){
+          bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
+        } else {
+          bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
         }
       };
     }
