@@ -6,6 +6,8 @@
 <title>Interview Scheduling</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --navy:#16233F;
@@ -357,32 +359,33 @@ let cancelTarget = null; // booking pending cancel confirmation
 let listDateFilter = 'all';
 
 /* ============================================================
-   Storage adapter — backed by Google Apps Script + Google Sheets
+   Storage adapter — backed by Firebase Firestore
    (replaces Claude's window.storage; same get/set shape so the
-   rest of the app barely had to change)
+   rest of the app barely had to change — no CORS issues here,
+   unlike the Google Apps Script approach we tried first)
    ============================================================ */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxlIvTWDp2P_VwrvT2tIAqPdPqPU8EYIRIJkIqJ1PnvDaBVeyhWp4HpVD6zK3jdS0Yp/exec';
-const API_SECRET = 'nhMCPE8a8fwGTmJXn4S9PBhSmnpfrBCy';
+const firebaseConfig = {
+  apiKey: "AIzaSyBDou88sJlI1YXoC3qunmN056N7nOkWBho",
+  authDomain: "interview-tester-cda8f.firebaseapp.com",
+  projectId: "interview-tester-cda8f",
+  storageBucket: "interview-tester-cda8f.firebasestorage.app",
+  messagingSenderId: "855325342402",
+  appId: "1:855325342402:web:025c13530350c547be595b"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const KV_COLLECTION = 'kv';
 
 const storage = {
   async get(key){
-    const url = `${API_URL}?action=get&key=${encodeURIComponent(key)}&secret=${encodeURIComponent(API_SECRET)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data.error) throw new Error(data.error);
-    return { key: data.key, value: data.value };
+    const snap = await db.collection(KV_COLLECTION).doc(key).get();
+    if(!snap.exists) return { key, value: null };
+    return { key, value: snap.data().value };
   },
   async set(key, value){
-    // IMPORTANT: this must be a GET, not a POST. Apps Script's /exec URL always
-    // responds with a 302 redirect to the actual execution server, and browser
-    // fetch() silently converts a redirected POST into a GET — dropping the
-    // JSON body entirely. GET requests don't have this problem, so we pass
-    // everything (including the value) as URL query parameters instead.
-    const url = `${API_URL}?action=set&key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}&secret=${encodeURIComponent(API_SECRET)}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if(data.error) throw new Error(data.error);
-    return { key: data.key, ok: data.ok };
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
+    await db.collection(KV_COLLECTION).doc(key).set({ value: stringValue });
+    return { key, ok: true };
   }
 };
 
