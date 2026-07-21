@@ -524,6 +524,8 @@ async function maybeSendGuideline(bookingId, latestApplicantText){
   if(idx === -1) return;
   const b = bookings[idx];
   if(b.guidelineSent) return; // only ever auto-send this once per booking
+  const applicantMsgCount = (b.messages||[]).filter(m => m.from === 'applicant').length;
+  if(applicantMsgCount !== 1) return; // only check the applicant's very first message — later messages never re-trigger this
   const name = (b.fullName||'').trim().toLowerCase();
   if(!name || !(latestApplicantText||'').toLowerCase().includes(name)) return;
   const dateLabel = fmtDateLabel(b.date);
@@ -547,12 +549,42 @@ function startChatPolling(bookingId, onTick){
   chatPollTimer = setInterval(async () => {
     await loadBookings();
     onTick();
-  }, 3000);
+  }, 1500);
 }
 function stopChatPolling(){
   if(chatPollTimer) clearInterval(chatPollTimer);
   chatPollTimer = null;
   chatPollBookingId = null;
+}
+
+// Re-renders while preserving the chat thread's scroll position — only
+// snaps back to the bottom if the person was already near the bottom
+// (so it doesn't yank them down while they're reading older messages).
+function renderPreservingChatScroll(){
+  const before = document.getElementById('chatThread');
+  const wasNearBottom = !before || (before.scrollHeight - before.scrollTop - before.clientHeight < 60);
+  const prevScrollTop = before ? before.scrollTop : 0;
+
+  const inputBefore = document.getElementById('chatInput');
+  const hadFocus = !!inputBefore && document.activeElement === inputBefore;
+  const cursorPos = inputBefore ? inputBefore.selectionStart : null;
+
+  render();
+
+  const after = document.getElementById('chatThread');
+  if(after){
+    after.scrollTop = wasNearBottom ? after.scrollHeight : prevScrollTop;
+  }
+
+  if(hadFocus){
+    const inputAfter = document.getElementById('chatInput');
+    if(inputAfter){
+      inputAfter.focus();
+      if(cursorPos != null){
+        try{ inputAfter.setSelectionRange(cursorPos, cursorPos); }catch(e){}
+      }
+    }
+  }
 }
 
 
@@ -1238,7 +1270,6 @@ function attachHandlers(){
         const val = $('#gateCode').value.trim();
         if(!val){ gateError='Please enter a code.'; render(); return; }
         gateBusy = true; gateError=''; render();
-        await loadBookings();
         if(val === config.adminCode){
           view='admin'; gateBusy=false; render();
         } else if(val === config.applicantCode){
@@ -1386,7 +1417,7 @@ function attachHandlers(){
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
     }
-    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) render(); });
+    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) renderPreservingChatScroll(); });
     const doneClose = $('#doneClose');
     if(doneClose) doneClose.onclick = () => {
       stopChatPolling();
@@ -1576,7 +1607,7 @@ function attachHandlers(){
           const fresh = bookings.find(b=>b.id===chatTarget.id);
           if(fresh) chatTarget = fresh;
           if(unreadCountForAdmin(chatTarget) > 0) await markChatReadByAdmin(chatTarget.id);
-          render();
+          renderPreservingChatScroll();
         }
       });
     } else {
@@ -1591,8 +1622,7 @@ function attachHandlers(){
    Init
    ============================================================ */
 (async function init(){
-  await loadConfig();
-  await loadBookings();
+  await Promise.all([loadConfig(), loadBookings()]);
   render();
 })();
 </script>
