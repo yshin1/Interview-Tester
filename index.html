@@ -538,6 +538,39 @@ async function maybeSendGuideline(bookingId, latestApplicantText){
   await saveBookings(next);
 }
 
+// Combines "send the applicant's message" + "maybe auto-send the guideline"
+// into a SINGLE load + SINGLE save, instead of two separate load/save pairs.
+// That was doubling the number of slow Apps Script round trips per message.
+async function sendApplicantMessage(bookingId, text){
+  const trimmed = (text||'').trim();
+  if(!trimmed) return null;
+  await loadBookings();
+  const idx = bookings.findIndex(b => b.id === bookingId);
+  if(idx === -1) return null;
+  const b = bookings[idx];
+  const msg = { from:'applicant', text: trimmed, at: new Date().toISOString() };
+  let messages = [...(b.messages||[]), msg];
+  let guidelineSent = b.guidelineSent;
+
+  const name = (b.fullName||'').trim().toLowerCase();
+  if(!guidelineSent && name && trimmed.toLowerCase().includes(name)){
+    const dateLabel = fmtDateLabel(b.date);
+    const now = Date.now();
+    const guidelineMsgs = GUIDELINE_MESSAGES.map((tpl, i) => ({
+      from: 'admin',
+      text: tpl.replace('{TIME}', b.time).replace('{DATE}', dateLabel),
+      at: new Date(now + i + 1).toISOString() // strictly after the applicant's message
+    }));
+    messages = [...messages, ...guidelineMsgs];
+    guidelineSent = true;
+  }
+
+  const updated = Object.assign({}, b, { messages, guidelineSent });
+  const next = [...bookings]; next[idx] = updated;
+  await saveBookings(next);
+  return updated;
+}
+
 let chatPollBookingId = null;
 let chatPollTimer = null;
 function startChatPolling(bookingId, onTick){
@@ -553,6 +586,37 @@ function stopChatPolling(){
   if(chatPollTimer) clearInterval(chatPollTimer);
   chatPollTimer = null;
   chatPollBookingId = null;
+}
+
+// Re-renders while preserving the chat thread's scroll position — only
+// snaps back to the bottom if the person was already near the bottom
+// (so it doesn't yank them down while they're reading older messages).
+// Also restores input focus/cursor so typing doesn't get interrupted.
+function renderPreservingChatScroll(){
+  const before = document.getElementById('chatThread');
+  const wasNearBottom = !before || (before.scrollHeight - before.scrollTop - before.clientHeight < 60);
+  const prevScrollTop = before ? before.scrollTop : 0;
+
+  const inputBefore = document.getElementById('chatInput');
+  const hadFocus = !!inputBefore && document.activeElement === inputBefore;
+  const cursorPos = inputBefore ? inputBefore.selectionStart : null;
+
+  render();
+
+  const after = document.getElementById('chatThread');
+  if(after){
+    after.scrollTop = wasNearBottom ? after.scrollHeight : prevScrollTop;
+  }
+
+  if(hadFocus){
+    const inputAfter = document.getElementById('chatInput');
+    if(inputAfter){
+      inputAfter.focus();
+      if(cursorPos != null){
+        try{ inputAfter.setSelectionRange(cursorPos, cursorPos); }catch(e){}
+      }
+    }
+  }
 }
 
 
@@ -1304,13 +1368,14 @@ function attachHandlers(){
       const submit = $('#infoSubmit');
       if(submit) submit.onclick = async () => {
         bk.error=''; bk.busy=true; render();
-        const MAX_ATTEMPTS = 4;
+        const MAX_ATTEMPTS = 5;
         let attempt = 0;
         let success = false;
         let newBooking = null;
-        try{
-          while(attempt < MAX_ATTEMPTS && !success){
-            attempt++;
+        let lastErrorWasNetwork = false;
+        while(attempt < MAX_ATTEMPTS && !success){
+          attempt++;
+          try{
             await loadBookings();
             const emailNorm = bk.email.trim().toLowerCase();
             const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm);
@@ -1346,16 +1411,22 @@ function attachHandlers(){
             if(stillThere && countForSlot <= cap){
               success = true;
             }
+            lastErrorWasNetwork = false;
             // otherwise loop and retry from a fresh read
+          }catch(e){
+            // A transient network/server hiccup — don't give up immediately,
+            // wait a beat and retry rather than erroring on the first blip.
+            lastErrorWasNetwork = true;
+            await new Promise(r => setTimeout(r, 700));
           }
-          bk.busy=false;
-          if(success){
-            bk.id = newBooking.id; bk.done=true; render();
-          } else {
-            bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
-          }
-        }catch(e){
-          bk.busy=false; bk.error='Something went wrong while booking. Please try again.'; render();
+        }
+        bk.busy=false;
+        if(success){
+          bk.id = newBooking.id; bk.done=true; render();
+        } else if(lastErrorWasNetwork){
+          bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
+        } else {
+          bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
         }
       };
     }
@@ -1368,11 +1439,10 @@ function attachHandlers(){
       if(!chatInput) return;
       const text = chatInput.value;
       if(!text.trim()) return;
-      chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
-      await sendChatMessage(bk.id, 'applicant', text);
-      await maybeSendGuideline(bk.id, text);
+      chatInput.disabled = true; if(chatSendBtn){ chatSendBtn.disabled = true; chatSendBtn.textContent = 'Sending…'; }
+      await sendApplicantMessage(bk.id, text);
       chatDraftText = '';
-      chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
+      chatInput.disabled = false; if(chatSendBtn){ chatSendBtn.disabled = false; chatSendBtn.textContent = 'Send'; }
       render();
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
@@ -1386,7 +1456,7 @@ function attachHandlers(){
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
     }
-    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) render(); });
+    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) renderPreservingChatScroll(); });
     const doneClose = $('#doneClose');
     if(doneClose) doneClose.onclick = () => {
       stopChatPolling();
@@ -1576,7 +1646,7 @@ function attachHandlers(){
           const fresh = bookings.find(b=>b.id===chatTarget.id);
           if(fresh) chatTarget = fresh;
           if(unreadCountForAdmin(chatTarget) > 0) await markChatReadByAdmin(chatTarget.id);
-          render();
+          renderPreservingChatScroll();
         }
       });
     } else {
