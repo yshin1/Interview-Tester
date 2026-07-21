@@ -524,8 +524,6 @@ async function maybeSendGuideline(bookingId, latestApplicantText){
   if(idx === -1) return;
   const b = bookings[idx];
   if(b.guidelineSent) return; // only ever auto-send this once per booking
-  const applicantMsgCount = (b.messages||[]).filter(m => m.from === 'applicant').length;
-  if(applicantMsgCount !== 1) return; // only check the applicant's very first message — later messages never re-trigger this
   const name = (b.fullName||'').trim().toLowerCase();
   if(!name || !(latestApplicantText||'').toLowerCase().includes(name)) return;
   const dateLabel = fmtDateLabel(b.date);
@@ -540,6 +538,40 @@ async function maybeSendGuideline(bookingId, latestApplicantText){
   await saveBookings(next);
 }
 
+// Combines "send the applicant's message" + "maybe auto-send the guideline"
+// into a SINGLE load + SINGLE save. Doing these as two separate operations
+// (each with their own load/save) doubled the number of slow Apps Script
+// round trips per message — this cuts it back down to one of each.
+async function sendApplicantMessage(bookingId, text){
+  const trimmed = (text||'').trim();
+  if(!trimmed) return null;
+  await loadBookings();
+  const idx = bookings.findIndex(b => b.id === bookingId);
+  if(idx === -1) return null;
+  const b = bookings[idx];
+  const msg = { from:'applicant', text: trimmed, at: new Date().toISOString() };
+  let messages = [...(b.messages||[]), msg];
+  let guidelineSent = b.guidelineSent;
+
+  const name = (b.fullName||'').trim().toLowerCase();
+  if(!guidelineSent && name && trimmed.toLowerCase().includes(name)){
+    const dateLabel = fmtDateLabel(b.date);
+    const now = Date.now();
+    const guidelineMsgs = GUIDELINE_MESSAGES.map((tpl, i) => ({
+      from: 'admin',
+      text: tpl.replace('{TIME}', b.time).replace('{DATE}', dateLabel),
+      at: new Date(now + i + 1).toISOString() // strictly after the applicant's message
+    }));
+    messages = [...messages, ...guidelineMsgs];
+    guidelineSent = true;
+  }
+
+  const updated = Object.assign({}, b, { messages, guidelineSent });
+  const next = [...bookings]; next[idx] = updated;
+  await saveBookings(next);
+  return updated;
+}
+
 let chatPollBookingId = null;
 let chatPollTimer = null;
 function startChatPolling(bookingId, onTick){
@@ -549,7 +581,7 @@ function startChatPolling(bookingId, onTick){
   chatPollTimer = setInterval(async () => {
     await loadBookings();
     onTick();
-  }, 1500);
+  }, 4000);
 }
 function stopChatPolling(){
   if(chatPollTimer) clearInterval(chatPollTimer);
@@ -1399,11 +1431,10 @@ function attachHandlers(){
       if(!chatInput) return;
       const text = chatInput.value;
       if(!text.trim()) return;
-      chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
-      await sendChatMessage(bk.id, 'applicant', text);
-      await maybeSendGuideline(bk.id, text);
+      chatInput.disabled = true; if(chatSendBtn){ chatSendBtn.disabled = true; chatSendBtn.textContent = 'Sending…'; }
+      await sendApplicantMessage(bk.id, text);
       chatDraftText = '';
-      chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
+      chatInput.disabled = false; if(chatSendBtn){ chatSendBtn.disabled = false; chatSendBtn.textContent = 'Send'; }
       render();
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
