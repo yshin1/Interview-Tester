@@ -1298,28 +1298,52 @@ function notionRowFields(b){
   return [contactDateStr, '1st Demo', '', b.fullName, 'Not confirmed yet', '', demoDateStr, b.time + ' PHT'];
 }
 let applicationDetailTarget = null;
+let selectedApplicationIds = new Set();
+let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 
 function renderAdminApplications(){
-  const sorted = [...applications].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-  if(sorted.length === 0){
+  if(applications.length === 0){
     return `<div class="card"><div class="empty-state">No applications yet.</div></div>`;
   }
-  const rows = sorted.map(a => `
+  const filtered = applicationFilterWorked==='all' ? applications : applications.filter(a => (a.workedBefore||'')===applicationFilterWorked);
+  const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+
+  const resultBadge = (result) => {
+    if(result==='pass') return '<span class="unread-badge" style="background:var(--success);">Pass</span>';
+    if(result==='fail') return '<span class="unread-badge" style="background:var(--danger);">Fail</span>';
+    return '<span style="color:var(--slate-light); font-size:12px;">Pending</span>';
+  };
+
+  const rows = sorted.length===0 ? `<tr><td colspan="6" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => `
     <tr>
-      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span></td>
+      <td><input type="checkbox" data-select-app="${a.id}" ${selectedApplicationIds.has(a.id)?'checked':''} style="width:16px; height:16px; accent-color:var(--navy);"></td>
+      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span><br><span style="color:var(--slate-light); font-size:10.5px;">Worked before: ${escapeHtml(a.workedBefore||'—')}</span></td>
       <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
-      <td>${a.status==='invited' ? '<span class="unread-badge" style="background:var(--success);">Invited</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
+      <td class="tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
+      <td>${resultBadge(a.result)}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
-          <button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Send Invite</button>
+          ${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}
         </div>
       </td>
     </tr>`).join('');
+
+  const selectedCount = [...selectedApplicationIds].filter(id => sorted.some(a=>a.id===id)).length;
+
   return `
   <div class="card">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <label style="margin:0; white-space:nowrap;">Filter: worked at Langdy before</label>
+      <select id="appFilterWorked" style="max-width:220px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterWorked==='all'?'selected':''}>All (${applications.length})</option>
+        <option value="Yes" ${applicationFilterWorked==='Yes'?'selected':''}>Yes (${applications.filter(a=>a.workedBefore==='Yes').length})</option>
+        <option value="No" ${applicationFilterWorked==='No'?'selected':''}>No (${applications.filter(a=>a.workedBefore==='No').length})</option>
+      </select>
+      <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
+    </div>
     <table class="list-table">
-      <thead><tr><th>Applicant</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
+      <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
@@ -1334,6 +1358,20 @@ function renderApplicationDetailModal(){
   <div class="modal-overlay" id="appDetailOverlay">
     <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
       <h3>${escapeHtml(a.fullName)}</h3>
+
+      <div class="field">
+        <label>Score (0–10)</label>
+        <input type="number" min="0" max="10" id="appScoreInput" value="${a.score!=null?a.score:''}" placeholder="Not scored yet">
+      </div>
+      <div class="field">
+        <label>Screening Result</label>
+        <div style="display:flex; gap:10px;">
+          <button class="btn ${a.result==='pass'?'btn-primary':'btn-ghost'}" id="appPassBtn" style="background:${a.result==='pass'?'var(--success)':''}; border-color:${a.result==='pass'?'var(--success)':''};">✅ Pass</button>
+          <button class="btn ${a.result==='fail'?'btn-danger-outline':'btn-ghost'}" id="appFailBtn" style="${a.result==='fail'?'background:var(--danger); color:#fff; border-color:var(--danger);':''}">❌ Fail</button>
+        </div>
+      </div>
+      <div class="divider"></div>
+
       ${row('Email', a.email)}
       ${row('Reference', a.reference)}
       ${row('Platform', a.platform)}
@@ -1678,7 +1716,9 @@ function attachHandlers(){
           laptopBackupPower: f.laptopBackupPower,
           laptopBackupDuration: f.laptopBackupDuration.trim(),
           submittedAt: new Date().toISOString(),
-          status: 'new' // 'new' | 'invited'
+          score: null,       // 0-10 or null
+          result: '',        // '' | 'pass' | 'fail'
+          invited: false
         };
         await loadApplications();
         await saveApplications([...applications, record]);
@@ -1868,17 +1908,7 @@ function attachHandlers(){
     });
 
     if(adminTab==='applications'){
-      $$('[data-view-app]').forEach(el=>{
-        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
-      });
-      $$('[data-invite-app]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.inviteApp;
-          const a = applications.find(x=>x.id===id);
-          if(!a) return;
-          const bookingUrl = window.location.origin + window.location.pathname;
-          const subject = "You're invited to schedule your 1st Demo — Langdy";
-          const body = `Hi ${a.fullName},
+      const buildInviteBody = (name) => `Hi ${name},
 
 Congratulations! You've been selected to move forward with your 1st Demo class.
 
@@ -1886,7 +1916,7 @@ Please use the access code below to book your interview slot:
 
 Access Code: ${config.applicantCode}
 
-Booking link: ${bookingUrl}
+Booking link: ${window.location.origin + window.location.pathname}
 
 Steps:
 1. Open the link above.
@@ -1898,21 +1928,84 @@ We look forward to your demo!
 
 Best,
 Langdy Team`;
-          const mailto = `mailto:${encodeURIComponent(a.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-          window.location.href = mailto;
+      const inviteSubject = "You're invited to schedule your 1st Demo — Langdy";
+
+      const filterSel = $('#appFilterWorked');
+      if(filterSel) filterSel.onchange = e => { applicationFilterWorked = e.target.value; render(); };
+
+      $$('[data-select-app]').forEach(el=>{
+        el.onchange = () => {
+          const id = el.dataset.selectApp;
+          if(el.checked) selectedApplicationIds.add(id); else selectedApplicationIds.delete(id);
+          render();
+        };
+      });
+
+      $$('[data-view-app]').forEach(el=>{
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+      });
+
+      $$('[data-invite-app]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.inviteApp;
+          const a = applications.find(x=>x.id===id);
+          if(!a) return;
+          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName))}`;
+          window.open(gmailUrl, '_blank');
           await loadApplications();
           const idx = applications.findIndex(x=>x.id===id);
           if(idx !== -1){
-            const updated = Object.assign({}, applications[idx], { status:'invited' });
+            const updated = Object.assign({}, applications[idx], { invited:true });
             const next = [...applications]; next[idx] = updated;
             await saveApplications(next);
             render();
           }
         };
       });
+
+      const bulkBtn = $('#bulkInviteBtn');
+      if(bulkBtn) bulkBtn.onclick = async () => {
+        const ids = [...selectedApplicationIds];
+        const selected = applications.filter(a => ids.includes(a.id));
+        if(selected.length === 0) return;
+        const emails = selected.map(a => a.email).join(',');
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
+        window.open(gmailUrl, '_blank');
+        await loadApplications();
+        const next = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
+        await saveApplications(next);
+        selectedApplicationIds = new Set();
+        render();
+      };
+
       if(applicationDetailTarget){
         $('#appDetailCloseBtn').onclick = () => { applicationDetailTarget=null; render(); };
         $('#appDetailOverlay').onclick = (e) => { if(e.target.id==='appDetailOverlay'){ applicationDetailTarget=null; render(); } };
+
+        const saveAppField = async (patch) => {
+          await loadApplications();
+          const idx = applications.findIndex(x=>x.id===applicationDetailTarget);
+          if(idx===-1) return;
+          const updated = Object.assign({}, applications[idx], patch);
+          const next = [...applications]; next[idx] = updated;
+          await saveApplications(next);
+          render();
+        };
+        const scoreInput = $('#appScoreInput');
+        if(scoreInput) scoreInput.onchange = e => {
+          const v = e.target.value === '' ? null : Math.max(0, Math.min(10, Number(e.target.value)));
+          saveAppField({ score: v });
+        };
+        const passBtn = $('#appPassBtn');
+        if(passBtn) passBtn.onclick = () => {
+          const a = applications.find(x=>x.id===applicationDetailTarget);
+          saveAppField({ result: (a && a.result==='pass') ? '' : 'pass' });
+        };
+        const failBtn = $('#appFailBtn');
+        if(failBtn) failBtn.onclick = () => {
+          const a = applications.find(x=>x.id===applicationDetailTarget);
+          saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
+        };
       }
     }
 
