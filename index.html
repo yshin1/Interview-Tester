@@ -431,6 +431,7 @@ let capacityDayTab = 1; // 1=Mon .. 5=Fri
 let capacitySaving = false;
 let capacitySaved = false;
 let cancelTarget = null; // booking pending cancel confirmation
+let notesTarget = null;  // booking whose notes modal is open
 let listDateFilter = 'all';
 
 /* ============================================================
@@ -1535,8 +1536,16 @@ function renderAdminList(){
         </select>
       </td>
       <td>
+        <select data-demoresult-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+          <option value="" ${!b.demoResult?'selected':''}>Pending</option>
+          <option value="pass" ${b.demoResult==='pass'?'selected':''}>Pass</option>
+          <option value="fail" ${b.demoResult==='fail'?'selected':''}>Fail</option>
+        </select>
+      </td>
+      <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unread>0?`<span class="unread-badge">${unread}</span>`:''}</button>
+          <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
           <button class="btn btn-ghost btn-sm" data-edit-id="${b.id}">Change</button>
           <button class="btn btn-danger-outline btn-sm" data-cancel-id="${b.id}">Cancel</button>
         </div>
@@ -1547,9 +1556,26 @@ function renderAdminList(){
   <div class="card">
     ${filterBar}
     <table class="list-table">
-      <thead><tr><th>Applicant</th><th>Booked At</th><th>Date</th><th>Time (PH)</th><th>Assigned</th><th>Manage</th></tr></thead>
+      <thead><tr><th>Applicant</th><th>Booked At</th><th>Date</th><th>Time (PH)</th><th>Assigned</th><th>1st Demo Result</th><th>Manage</th></tr></thead>
       <tbody>${trs}</tbody>
     </table>
+  </div>
+  ${notesTarget ? renderNotesModal() : ''}`;
+}
+
+function renderNotesModal(){
+  const b = bookings.find(x => x.id === notesTarget) || {};
+  return `
+  <div class="modal-overlay" id="notesModalOverlay">
+    <div class="modal" style="max-width:640px;">
+      <h3>Notes — ${escapeHtml(b.fullName)} (${fmtDateLabel(b.date)} ${b.time})</h3>
+      <p class="section-desc" style="margin-bottom:10px;">Write your 1st Demo review here — overall review, feedback, checklist, whatever format you like. This replaces having to open a separate Notion page per applicant.</p>
+      <textarea id="notesTextarea" style="width:100%; min-height:360px; font-size:13px; line-height:1.6;">${escapeHtml(b.notes||'')}</textarea>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="notesCloseBtn">Close</button>
+        <button class="btn btn-primary" id="notesSaveBtn">Save Notes</button>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -2216,6 +2242,36 @@ Langdy Team`;
           render();
         };
       });
+      $$('[data-demoresult-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.demoresultId;
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { demoResult: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-notes-id]').forEach(el=>{
+        el.onclick = () => { notesTarget = el.dataset.notesId; render(); };
+      });
+      if(notesTarget){
+        $('#notesCloseBtn').onclick = () => { notesTarget=null; render(); };
+        $('#notesModalOverlay').onclick = (e) => { if(e.target.id==='notesModalOverlay'){ notesTarget=null; render(); } };
+        $('#notesSaveBtn').onclick = async () => {
+          const text = document.getElementById('notesTextarea').value;
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===notesTarget);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { notes: text });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          notesTarget = null;
+          render();
+        };
+      }
     }
 
     if(adminTab==='dates'){
