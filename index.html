@@ -343,6 +343,20 @@ const WEEKEND_BLOCKS = (() => {
 const BACKUP_POWER_OPTIONS = ['Gasoline generator','Building generator','Car battery','Back-up UPS','Powerbank/Powerstation (30,000 mAh or above)','None'];
 const ASSIGNEE_OPTIONS = ['Lyn','Sabrina','Soo','Julia','Elena'];
 
+// Shared result options for both 1st and 2nd Demo result dropdowns.
+const DEMO_RESULT_OPTIONS = [
+  {value:'', label:'Pending'},
+  {value:'pass', label:'Pass'},
+  {value:'fail', label:'Fail'},
+  {value:'noShow', label:'No Show'},
+  {value:'withdraw', label:'Withdraw'}
+];
+function renderResultSelect(dataAttr, id, currentValue){
+  return `<select data-${dataAttr}="${id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+    ${DEMO_RESULT_OPTIONS.map(o=>`<option value="${o.value}" ${currentValue===o.value?'selected':''}>${o.label}</option>`).join('')}
+  </select>`;
+}
+
 // Default assignee rules for newly-created bookings:
 // - 08:15–10:15 (all AM slots)      -> Lyn
 // - 12:00–13:30                      -> capacity 1: Sabrina. capacity 2+: alternates Lyn/Sabrina by seat position
@@ -721,7 +735,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list') && !editingBooking && !cancelTarget && !chatTarget){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget){
       render();
     }
   }, 4000);
@@ -1268,7 +1282,7 @@ function renderAdmin(){
   const tabs = [
     ['applications','Applications'],
     ['calendar','Calendar'],
-    ['list','List'],
+    ['list','1st Demo'],
     ['secondDemo','2nd Demo'],
     ['dates','Availability'],
     ['capacity','Slot Settings'],
@@ -1500,15 +1514,16 @@ function renderDeleteApplicationModal(){
 
 
 function renderAdminList(){
-  const allDates = Array.from(new Set(bookings.map(b=>b.date))).sort();
-  const filtered = listDateFilter==='all' ? bookings : bookings.filter(b=>b.date===listDateFilter);
+  const activeBookings = bookings.filter(b => b.demoResult !== 'pass'); // passed applicants move to the 2nd Demo tab only
+  const allDates = Array.from(new Set(activeBookings.map(b=>b.date))).sort();
+  const filtered = listDateFilter==='all' ? activeBookings : activeBookings.filter(b=>b.date===listDateFilter);
   const rows = [...filtered].sort((a,b)=>{
     const key = x => x.date + ' ' + x.time;
     return key(a).localeCompare(key(b));
   });
-  const filterOptions = `<option value="all" ${listDateFilter==='all'?'selected':''}>All dates (${bookings.length})</option>` +
+  const filterOptions = `<option value="all" ${listDateFilter==='all'?'selected':''}>All dates (${activeBookings.length})</option>` +
     allDates.map(ds => {
-      const count = bookings.filter(b=>b.date===ds).length;
+      const count = activeBookings.filter(b=>b.date===ds).length;
       return `<option value="${ds}" ${listDateFilter===ds?'selected':''}>${fmtDateLabel(ds)} (${count})</option>`;
     }).join('');
   const filterBar = `
@@ -1537,13 +1552,7 @@ function renderAdminList(){
           ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.assignedTo===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </td>
-      <td>
-        <select data-demoresult-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
-          <option value="" ${!b.demoResult?'selected':''}>Pending</option>
-          <option value="pass" ${b.demoResult==='pass'?'selected':''}>Pass</option>
-          <option value="fail" ${b.demoResult==='fail'?'selected':''}>Fail</option>
-        </select>
-      </td>
+      <td>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unread>0?`<span class="unread-badge">${unread}</span>`:''}</button>
@@ -1595,9 +1604,32 @@ function renderAdminSecondDemo(){
     <tr>
       <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td class="tag">${fmtDateLabel(b.date)} ${b.time} PHT</td>
-      <td>${b.assignedTo ? escapeHtml(b.assignedTo) : '<span style="color:var(--slate-light);">—</span>'}</td>
+      <td>
+        <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+          <option value="" ${!b.secondDemoAssignedTo?'selected':''}>—</option>
+          ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.secondDemoAssignedTo===n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </td>
       <td><input type="date" data-2nd-date-id="${b.id}" value="${b.secondDemoDate||''}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;"></td>
-      <td><input type="time" data-2nd-time-id="${b.id}" value="${b.secondDemoTime||''}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;"></td>
+      <td>
+        ${(() => {
+          const [curH, curM] = (b.secondDemoTime||'').split(':');
+          const hourOptions = Array.from({length:24}, (_,h) => String(h).padStart(2,'0'))
+            .map(h => `<option value="${h}" ${curH===h?'selected':''}>${h}</option>`).join('');
+          const minuteOptions = ['00','15','30','45']
+            .map(m => `<option value="${m}" ${curM===m?'selected':''}>${m}</option>`).join('');
+          return `<div style="display:flex; align-items:center; gap:4px;">
+            <select data-2nd-hour-id="${b.id}" style="font-size:12.5px; padding:6px 6px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+              <option value="">--</option>${hourOptions}
+            </select>
+            <span style="color:var(--slate-light);">:</span>
+            <select data-2nd-minute-id="${b.id}" style="font-size:12.5px; padding:6px 6px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+              <option value="">--</option>${minuteOptions}
+            </select>
+          </div>`;
+        })()}
+      </td>
+      <td>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
@@ -1608,7 +1640,7 @@ function renderAdminSecondDemo(){
   <div class="card">
     <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 1st Demo Result show up here. The date/time below is set manually (2nd Demo is scheduled verbally, not through the booking system) and is completely separate from the 1st Demo slots — no capacity limits apply. Times are in <strong>Korea Standard Time (KST)</strong>, not PHT.</p>
     <table class="list-table">
-      <thead><tr><th>Applicant</th><th>1st Demo</th><th>Assigned</th><th>2nd Demo Date (KST)</th><th>2nd Demo Time (KST)</th><th>Manage</th></tr></thead>
+      <thead><tr><th>Applicant</th><th>1st Demo</th><th>2nd Demo Assigned</th><th>2nd Demo Date (KST)</th><th>2nd Demo Time (KST)</th><th>2nd Demo Result</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
@@ -2086,7 +2118,7 @@ function attachHandlers(){
       stopApplicationsPolling();
     }
 
-    if(adminTab==='calendar' || adminTab==='list'){
+    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo'){
       startBookingsPolling();
     } else {
       stopBookingsPolling();
@@ -2324,13 +2356,50 @@ Langdy Team`;
           render();
         };
       });
-      $$('[data-2nd-time-id]').forEach(el=>{
+      const updateSecondDemoTime = async (id) => {
+        const hourEl = document.querySelector(`[data-2nd-hour-id="${id}"]`);
+        const minuteEl = document.querySelector(`[data-2nd-minute-id="${id}"]`);
+        const h = hourEl ? hourEl.value : '';
+        const m = minuteEl ? minuteEl.value : '';
+        const combined = (h && m) ? `${h}:${m}` : '';
+        await loadBookings();
+        const idx = bookings.findIndex(x=>x.id===id);
+        if(idx===-1) return;
+        const updated = Object.assign({}, bookings[idx], { secondDemoTime: combined });
+        const next = [...bookings]; next[idx] = updated;
+        await saveBookings(next);
+        // Only re-render once BOTH hour and minute are chosen. If we re-rendered
+        // after just the hour was picked (with minute still blank), the whole
+        // row gets regenerated from data — and since the combined time is still
+        // empty at that point, it would visually reset the hour back to blank
+        // before the person ever gets to pick the minute.
+        if(combined) render();
+      };
+      $$('[data-2nd-hour-id]').forEach(el=>{
+        el.onchange = () => updateSecondDemoTime(el.dataset['2ndHourId']);
+      });
+      $$('[data-2nd-minute-id]').forEach(el=>{
+        el.onchange = () => updateSecondDemoTime(el.dataset['2ndMinuteId']);
+      });
+      $$('[data-2nd-assign-id]').forEach(el=>{
         el.onchange = async () => {
-          const id = el.dataset['2ndTimeId'];
+          const id = el.dataset['2ndAssignId'];
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===id);
           if(idx===-1) return;
-          const updated = Object.assign({}, bookings[idx], { secondDemoTime: el.value });
+          const updated = Object.assign({}, bookings[idx], { secondDemoAssignedTo: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-2nd-result-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset['2ndResultId'];
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { secondDemoResult: el.value });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           render();
