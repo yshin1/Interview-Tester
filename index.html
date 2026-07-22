@@ -317,7 +317,6 @@
    ============================================================ */
 const CONFIG_KEY = 'app-config';
 const BOOKINGS_KEY = 'app-bookings';
-const APPLICATIONS_KEY = 'app-applications';
 
 /* ------------------------------------------------------------
    Application form constants
@@ -516,24 +515,30 @@ async function saveBookings(next){
 }
 
 let applications = [];
+const APPLICATIONS_COLLECTION = 'applications';
+
+// One Firestore document per applicant — instead of one giant array in a
+// single document. This avoids Firestore's 1MB-per-document limit at scale,
+// and means two people submitting at the same instant can never clobber
+// each other's data (each writes to their own document).
 async function loadApplications(){
   try{
-    const res = await storage.get(APPLICATIONS_KEY);
-    applications = (res && res.value) ? JSON.parse(res.value) : [];
+    const snap = await db.collection(APPLICATIONS_COLLECTION).get();
+    applications = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     applications = [];
   }
   return applications;
 }
-async function saveApplications(next){
-  const previous = applications;
-  applications = next;
-  try{
-    await storage.set(APPLICATIONS_KEY, JSON.stringify(applications));
-  }catch(e){
-    applications = previous;
-    throw e;
-  }
+async function saveOneApplication(app){
+  const { id, ...data } = app;
+  await db.collection(APPLICATIONS_COLLECTION).doc(id).set(data);
+  const idx = applications.findIndex(x => x.id === id);
+  if(idx === -1) applications.push(app); else applications[idx] = app;
+}
+async function deleteOneApplication(id){
+  await db.collection(APPLICATIONS_COLLECTION).doc(id).delete();
+  applications = applications.filter(x => x.id !== id);
 }
 
 /* ============================================================
@@ -1760,8 +1765,7 @@ function attachHandlers(){
           result: '',        // '' | 'pass' | 'fail'
           invited: false
         };
-        await loadApplications();
-        await saveApplications([...applications, record]);
+        await saveOneApplication(record);
         f.busy = false; f.done = true; render();
       }catch(e){
         console.error('APPLICATION SUBMIT ERROR:', e);
@@ -2002,14 +2006,8 @@ Langdy Team`;
           if(!a) return;
           const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName))}`;
           window.open(gmailUrl, '_blank');
-          await loadApplications();
-          const idx = applications.findIndex(x=>x.id===id);
-          if(idx !== -1){
-            const updated = Object.assign({}, applications[idx], { invited:true });
-            const next = [...applications]; next[idx] = updated;
-            await saveApplications(next);
-            render();
-          }
+          await saveOneApplication(Object.assign({}, a, { invited:true }));
+          render();
         };
       });
 
@@ -2021,9 +2019,10 @@ Langdy Team`;
         const emails = selected.map(a => a.email).join(',');
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
         window.open(gmailUrl, '_blank');
-        await loadApplications();
-        const next = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
-        await saveApplications(next);
+        const batch = db.batch();
+        selected.forEach(a => { batch.update(db.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true }); });
+        await batch.commit();
+        applications = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
         selectedApplicationIds = new Set();
         render();
       };
@@ -2033,12 +2032,10 @@ Langdy Team`;
         $('#appDetailOverlay').onclick = (e) => { if(e.target.id==='appDetailOverlay'){ applicationDetailTarget=null; render(); } };
 
         const saveAppField = async (patch) => {
-          await loadApplications();
           const idx = applications.findIndex(x=>x.id===applicationDetailTarget);
           if(idx===-1) return;
           const updated = Object.assign({}, applications[idx], patch);
-          const next = [...applications]; next[idx] = updated;
-          await saveApplications(next);
+          await saveOneApplication(updated);
           render();
         };
         const scoreInput = $('#appScoreInput');
@@ -2063,8 +2060,7 @@ Langdy Team`;
         $('#deleteAppOverlay').onclick = (e) => { if(e.target.id==='deleteAppOverlay'){ deleteApplicationTarget=null; render(); } };
         $('#deleteAppYesBtn').onclick = async () => {
           const id = deleteApplicationTarget;
-          await loadApplications();
-          await saveApplications(applications.filter(x=>x.id!==id));
+          await deleteOneApplication(id);
           selectedApplicationIds.delete(id);
           deleteApplicationTarget = null;
           render();
