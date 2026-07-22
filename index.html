@@ -711,6 +711,25 @@ function stopApplicationsPolling(){
   appsPollTimer = null;
 }
 
+// Same idea, but for the 1st-demo bookings (Calendar/List tabs) — auto-refresh
+// so new bookings/chat activity show up without needing to log out/in again.
+// Skips re-rendering while any modal is open (edit, cancel, chat) so it
+// doesn't interrupt an active edit; it still fetches in the background.
+let bookingsPollTimer = null;
+function startBookingsPolling(){
+  if(bookingsPollTimer) return;
+  bookingsPollTimer = setInterval(async () => {
+    await loadBookings();
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list') && !editingBooking && !cancelTarget && !chatTarget){
+      render();
+    }
+  }, 4000);
+}
+function stopBookingsPolling(){
+  if(bookingsPollTimer) clearInterval(bookingsPollTimer);
+  bookingsPollTimer = null;
+}
+
 // Re-renders while preserving the chat thread's scroll position — only
 // snaps back to the bottom if the person was already near the bottom
 // (so it doesn't yank them down while they're reading older messages).
@@ -1689,6 +1708,7 @@ function attachHandlers(){
   if(logoutBtn) logoutBtn.onclick = () => {
     stopChatPolling();
     stopApplicationsPolling();
+    stopBookingsPolling();
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
     bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
     render();
@@ -1983,6 +2003,12 @@ function attachHandlers(){
       startApplicationsPolling();
     } else {
       stopApplicationsPolling();
+    }
+
+    if(adminTab==='calendar' || adminTab==='list'){
+      startBookingsPolling();
+    } else {
+      stopBookingsPolling();
     }
 
     if(adminTab==='applications'){
