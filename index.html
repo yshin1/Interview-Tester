@@ -1269,6 +1269,7 @@ function renderAdmin(){
     ['applications','Applications'],
     ['calendar','Calendar'],
     ['list','List'],
+    ['secondDemo','2nd Demo'],
     ['dates','Availability'],
     ['capacity','Slot Settings'],
     ['codes','Access Codes'],
@@ -1281,6 +1282,7 @@ function renderAdmin(){
   if(adminTab==='applications') body = renderAdminApplications();
   else if(adminTab==='calendar') body = renderAdminCalendar();
   else if(adminTab==='list') body = renderAdminList();
+  else if(adminTab==='secondDemo') body = renderAdminSecondDemo();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='codes') body = renderAdminCodes();
@@ -1578,6 +1580,41 @@ function renderNotesModal(){
     </div>
   </div>`;
 }
+
+function renderAdminSecondDemo(){
+  const passed = bookings.filter(b => b.demoResult === 'pass');
+  if(passed.length === 0){
+    return `<div class="card"><div class="empty-state">No one has passed the 1st Demo yet. Mark someone as "Pass" in the List tab's 1st Demo Result column and they'll show up here.</div></div>`;
+  }
+  const sorted = [...passed].sort((a,b) => {
+    const ka = a.secondDemoDate ? a.secondDemoDate+' '+(a.secondDemoTime||'') : '9999';
+    const kb = b.secondDemoDate ? b.secondDemoDate+' '+(b.secondDemoTime||'') : '9999';
+    return ka.localeCompare(kb);
+  });
+  const rows = sorted.map(b => `
+    <tr>
+      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td class="tag">${fmtDateLabel(b.date)} ${b.time} PHT</td>
+      <td>${b.assignedTo ? escapeHtml(b.assignedTo) : '<span style="color:var(--slate-light);">—</span>'}</td>
+      <td><input type="date" data-2nd-date-id="${b.id}" value="${b.secondDemoDate||''}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;"></td>
+      <td><input type="time" data-2nd-time-id="${b.id}" value="${b.secondDemoTime||''}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;"></td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `
+  <div class="card">
+    <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 1st Demo Result show up here. The date/time below is set manually (2nd Demo is scheduled verbally, not through the booking system) and is completely separate from the 1st Demo slots — no capacity limits apply. Times are in <strong>Korea Standard Time (KST)</strong>, not PHT.</p>
+    <table class="list-table">
+      <thead><tr><th>Applicant</th><th>1st Demo</th><th>Assigned</th><th>2nd Demo Date (KST)</th><th>2nd Demo Time (KST)</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  ${notesTarget ? renderNotesModal() : ''}`;
+}
+
 
 function renderAdminDates(){
   const base = new Date();
@@ -2249,6 +2286,51 @@ Langdy Team`;
           const idx = bookings.findIndex(x=>x.id===id);
           if(idx===-1) return;
           const updated = Object.assign({}, bookings[idx], { demoResult: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-notes-id]').forEach(el=>{
+        el.onclick = () => { notesTarget = el.dataset.notesId; render(); };
+      });
+      if(notesTarget){
+        $('#notesCloseBtn').onclick = () => { notesTarget=null; render(); };
+        $('#notesModalOverlay').onclick = (e) => { if(e.target.id==='notesModalOverlay'){ notesTarget=null; render(); } };
+        $('#notesSaveBtn').onclick = async () => {
+          const text = document.getElementById('notesTextarea').value;
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===notesTarget);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { notes: text });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          notesTarget = null;
+          render();
+        };
+      }
+    }
+
+    if(adminTab==='secondDemo'){
+      $$('[data-2nd-date-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset['2ndDateId'];
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { secondDemoDate: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-2nd-time-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset['2ndTimeId'];
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { secondDemoTime: el.value });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           render();
