@@ -1378,10 +1378,11 @@ function renderAdminApplications(){
       <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
       <td class="tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
       <td>
-        <div style="display:flex; gap:5px;">
-          <button class="btn btn-sm" data-pass-app="${a.id}" style="width:auto; padding:6px 10px; ${a.result==='pass' ? 'background:var(--success); color:#fff; border-color:var(--success);' : 'background:#fff; border:1.5px solid var(--line); color:var(--slate);'}">✅</button>
-          <button class="btn btn-sm" data-fail-app="${a.id}" style="width:auto; padding:6px 10px; ${a.result==='fail' ? 'background:var(--danger); color:#fff; border-color:var(--danger);' : 'background:#fff; border:1.5px solid var(--line); color:var(--slate);'}">❌</button>
-        </div>
+        <select data-result-app="${a.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+          <option value="" ${!a.result?'selected':''}>Pending</option>
+          <option value="pass" ${a.result==='pass'?'selected':''}>Pass</option>
+          <option value="fail" ${a.result==='fail'?'selected':''}>Fail</option>
+        </select>
       </td>
       <td>${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}</td>
       <td><button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button></td>
@@ -2066,21 +2067,12 @@ Langdy Team`;
         };
       });
 
-      $$('[data-pass-app]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.passApp;
+      $$('[data-result-app]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.resultApp;
           const a = applications.find(x=>x.id===id);
           if(!a) return;
-          await saveOneApplication(Object.assign({}, a, { result: a.result==='pass' ? '' : 'pass' }));
-          render();
-        };
-      });
-      $$('[data-fail-app]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.failApp;
-          const a = applications.find(x=>x.id===id);
-          if(!a) return;
-          await saveOneApplication(Object.assign({}, a, { result: a.result==='fail' ? '' : 'fail' }));
+          await saveOneApplication(Object.assign({}, a, { result: el.value }));
           render();
         };
       });
