@@ -1354,34 +1354,38 @@ let applicationDetailTarget = null;
 let deleteApplicationTarget = null;
 let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
+let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
+let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
 
 function renderAdminApplications(){
   if(applications.length === 0){
     return `<div class="card"><div class="empty-state">No applications yet.</div></div>`;
   }
-  const filtered = applicationFilterWorked==='all' ? applications : applications.filter(a => (a.workedBefore||'')===applicationFilterWorked);
+  let filtered = applications;
+  if(applicationFilterWorked!=='all') filtered = filtered.filter(a => (a.workedBefore||'')===applicationFilterWorked);
+  if(applicationFilterInvited==='invited') filtered = filtered.filter(a => !!a.invited);
+  if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
+  if(applicationFilterResult!=='all'){
+    if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
+    else filtered = filtered.filter(a => a.result===applicationFilterResult);
+  }
   const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
 
-  const resultBadge = (result) => {
-    if(result==='pass') return '<span class="unread-badge" style="background:var(--success);">Pass</span>';
-    if(result==='fail') return '<span class="unread-badge" style="background:var(--danger);">Fail</span>';
-    return '<span style="color:var(--slate-light); font-size:12px;">Pending</span>';
-  };
-
-  const rows = sorted.length===0 ? `<tr><td colspan="6" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => `
+  const rows = sorted.length===0 ? `<tr><td colspan="8" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => `
     <tr>
       <td><input type="checkbox" data-select-app="${a.id}" ${selectedApplicationIds.has(a.id)?'checked':''} style="width:16px; height:16px; accent-color:var(--navy);"></td>
       <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span><br><span style="color:var(--slate-light); font-size:10.5px;">Worked before: ${escapeHtml(a.workedBefore||'—')}</span></td>
       <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
       <td class="tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
-      <td>${resultBadge(a.result)}</td>
       <td>
-        <div class="row-actions">
-          <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
-          ${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}
-          <button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button>
+        <div style="display:flex; gap:5px;">
+          <button class="btn btn-sm" data-pass-app="${a.id}" style="width:auto; padding:6px 10px; ${a.result==='pass' ? 'background:var(--success); color:#fff; border-color:var(--success);' : 'background:#fff; border:1.5px solid var(--line); color:var(--slate);'}">✅</button>
+          <button class="btn btn-sm" data-fail-app="${a.id}" style="width:auto; padding:6px 10px; ${a.result==='fail' ? 'background:var(--danger); color:#fff; border-color:var(--danger);' : 'background:#fff; border:1.5px solid var(--line); color:var(--slate);'}">❌</button>
         </div>
       </td>
+      <td>${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}</td>
+      <td><button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button></td>
+      <td style="padding-left:22px;"><button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button></td>
     </tr>`).join('');
 
   const selectedCount = [...selectedApplicationIds].filter(id => sorted.some(a=>a.id===id)).length;
@@ -1389,16 +1393,29 @@ function renderAdminApplications(){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <label style="margin:0; white-space:nowrap;">Filter: worked at Langdy before</label>
-      <select id="appFilterWorked" style="max-width:220px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <label style="margin:0; white-space:nowrap;">Worked before</label>
+      <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         <option value="all" ${applicationFilterWorked==='all'?'selected':''}>All (${applications.length})</option>
         <option value="Yes" ${applicationFilterWorked==='Yes'?'selected':''}>Yes (${applications.filter(a=>a.workedBefore==='Yes').length})</option>
         <option value="No" ${applicationFilterWorked==='No'?'selected':''}>No (${applications.filter(a=>a.workedBefore==='No').length})</option>
       </select>
+      <label style="margin:0; white-space:nowrap;">Invited</label>
+      <select id="appFilterInvited" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${applications.length})</option>
+        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${applications.filter(a=>a.invited).length})</option>
+        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${applications.filter(a=>!a.invited).length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Result</label>
+      <select id="appFilterResult" style="max-width:160px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${applications.length})</option>
+        <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${applications.filter(a=>a.result==='pass').length})</option>
+        <option value="fail" ${applicationFilterResult==='fail'?'selected':''}>Fail (${applications.filter(a=>a.result==='fail').length})</option>
+        <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${applications.filter(a=>!a.result).length})</option>
+      </select>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
     </div>
     <table class="list-table">
-      <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Manage</th></tr></thead>
+      <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Invited</th><th>View</th><th>Delete</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
@@ -2036,11 +2053,34 @@ Langdy Team`;
 
       const filterSel = $('#appFilterWorked');
       if(filterSel) filterSel.onchange = e => { applicationFilterWorked = e.target.value; render(); };
+      const filterInvitedSel = $('#appFilterInvited');
+      if(filterInvitedSel) filterInvitedSel.onchange = e => { applicationFilterInvited = e.target.value; render(); };
+      const filterResultSel = $('#appFilterResult');
+      if(filterResultSel) filterResultSel.onchange = e => { applicationFilterResult = e.target.value; render(); };
 
       $$('[data-select-app]').forEach(el=>{
         el.onchange = () => {
           const id = el.dataset.selectApp;
           if(el.checked) selectedApplicationIds.add(id); else selectedApplicationIds.delete(id);
+          render();
+        };
+      });
+
+      $$('[data-pass-app]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.passApp;
+          const a = applications.find(x=>x.id===id);
+          if(!a) return;
+          await saveOneApplication(Object.assign({}, a, { result: a.result==='pass' ? '' : 'pass' }));
+          render();
+        };
+      });
+      $$('[data-fail-app]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.failApp;
+          const a = applications.find(x=>x.id===id);
+          if(!a) return;
+          await saveOneApplication(Object.assign({}, a, { result: a.result==='fail' ? '' : 'fail' }));
           render();
         };
       });
