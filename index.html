@@ -342,6 +342,24 @@ const WEEKEND_BLOCKS = (() => {
 })();
 const BACKUP_POWER_OPTIONS = ['Gasoline generator','Building generator','Car battery','Back-up UPS','Powerbank/Powerstation (30,000 mAh or above)','None'];
 const ASSIGNEE_OPTIONS = ['Lyn','Sabrina','Soo','Julia','Elena'];
+
+// Default assignee rules for newly-created bookings:
+// - 08:15–10:15 (all AM slots)      -> Lyn
+// - 12:00–13:30                      -> capacity 1: Sabrina. capacity 2+: alternates Lyn/Sabrina by seat position
+// - 14:00 onward                     -> Sabrina
+// Admin can always override this afterward from the List tab.
+function defaultAssigneeFor(date, time){
+  const [h,m] = time.split(':').map(Number);
+  const totalMin = h*60 + m;
+  if(totalMin <= 10*60 + 30) return 'Lyn';
+  if(totalMin < 14*60){
+    const cap = slotCapacityFor(date, time);
+    const existingCount = slotsUsed(date, time); // bookings already in this slot, before this new one
+    if(cap <= 1) return 'Sabrina';
+    return existingCount % 2 === 0 ? 'Lyn' : 'Sabrina';
+  }
+  return 'Sabrina';
+}
 const BACKUP_INTERNET_OPTIONS = ['Prepaid Wifi','Prepaid Network (SIM)','Spare internet provider','Unlimited Data Plan (Phone)','Router + Converter cable + Backup battery'];
 
 const SLOTS = [
@@ -1473,7 +1491,12 @@ function renderAdminList(){
       <td class="tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
       <td class="tag">${fmtDateLabel(b.date)}</td>
       <td class="tag">${b.time}</td>
-      <td>${b.assignedTo ? escapeHtml(b.assignedTo) : '<span style="color:var(--slate-light);">—</span>'}</td>
+      <td>
+        <select data-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+          <option value="" ${!b.assignedTo?'selected':''}>—</option>
+          ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.assignedTo===n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unread>0?`<span class="unread-badge">${unread}</span>`:''}</button>
@@ -1884,7 +1907,7 @@ function attachHandlers(){
               messages: [{ from:'system', text:'Please start by sending your Full Name!', at: new Date().toISOString() }],
               guidelineSent: false,
               lastReadByAdmin: null,
-              assignedTo: ''
+              assignedTo: defaultAssigneeFor(bk.date, bk.time)
             };
             await saveBookings([...bookings, newBooking]);
             // Verify the write actually stuck — the shared storage is "last write wins",
@@ -2120,6 +2143,18 @@ Langdy Team`;
         el.onclick = () => {
           const id = el.dataset.cancelId;
           cancelTarget = bookings.find(x=>x.id===id);
+          render();
+        };
+      });
+      $$('[data-assign-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.assignId;
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { assignedTo: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
           render();
         };
       });
