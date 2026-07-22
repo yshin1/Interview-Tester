@@ -677,6 +677,25 @@ function stopChatPolling(){
   chatPollBookingId = null;
 }
 
+// Auto-refreshes the admin Applications list so new submissions show up
+// without needing to log out/in again. Skips re-rendering while a modal is
+// open (detail view, delete confirm) so it doesn't interrupt active edits —
+// it still fetches in the background and catches up on the next render.
+let appsPollTimer = null;
+function startApplicationsPolling(){
+  if(appsPollTimer) return;
+  appsPollTimer = setInterval(async () => {
+    await loadApplications();
+    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !deleteApplicationTarget){
+      render();
+    }
+  }, 4000);
+}
+function stopApplicationsPolling(){
+  if(appsPollTimer) clearInterval(appsPollTimer);
+  appsPollTimer = null;
+}
+
 // Re-renders while preserving the chat thread's scroll position — only
 // snaps back to the bottom if the person was already near the bottom
 // (so it doesn't yank them down while they're reading older messages).
@@ -1637,6 +1656,7 @@ function attachHandlers(){
   const logoutBtn = $('#logoutBtn');
   if(logoutBtn) logoutBtn.onclick = () => {
     stopChatPolling();
+    stopApplicationsPolling();
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
     bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
     render();
@@ -1926,6 +1946,12 @@ function attachHandlers(){
     $$('.admin-tab').forEach(el=>{
       el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
+
+    if(adminTab==='applications'){
+      startApplicationsPolling();
+    } else {
+      stopApplicationsPolling();
+    }
 
     if(adminTab==='applications'){
       const buildInviteBody = (name) => `Hi ${name},
