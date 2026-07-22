@@ -1684,6 +1684,7 @@ function attachHandlers(){
         await saveApplications([...applications, record]);
         f.busy = false; f.done = true; render();
       }catch(e){
+        console.error('APPLICATION SUBMIT ERROR:', e);
         f.busy = false;
         f.error = 'Something went wrong submitting your application. Please try again.'; render();
       }
