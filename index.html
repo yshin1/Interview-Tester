@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
 <style>
   :root{
     --navy:#16233F;
@@ -285,6 +286,20 @@
   .chat-input-row button{ width:auto; padding:10px 18px; }
   .find-link{ background:none; border:none; color:var(--slate); font-size:13px; font-weight:600; text-decoration:underline; cursor:pointer; font-family:inherit; margin-top:14px; }
 
+  /* ---------- apply form ---------- */
+  .apply-wrap{ max-width:640px; margin:0 auto; padding:32px 20px 60px; }
+  .apply-section{ margin-bottom:28px; }
+  .apply-section-title{ font-size:15px; font-weight:800; margin:0 0 4px; padding-bottom:8px; border-bottom:2px solid var(--line); }
+  .apply-section-desc{ font-size:12.5px; color:var(--slate); margin:6px 0 16px; }
+  textarea{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; resize:vertical; min-height:90px; }
+  select{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; }
+  .checkbox-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
+  .checkbox-item{ display:flex; align-items:center; gap:6px; border:1.5px solid var(--line); border-radius:8px; padding:8px 10px; font-size:12.5px; cursor:pointer; }
+  .checkbox-item input{ width:16px; height:16px; accent-color:var(--navy); cursor:pointer; }
+  .file-drop{ border:1.5px dashed var(--line); border-radius:10px; padding:16px; text-align:center; font-size:13px; color:var(--slate); }
+  .file-drop input[type=file]{ display:block; margin:8px auto 0; font-size:12.5px; }
+  .file-drop .fname{ font-weight:700; color:var(--ink); margin-top:6px; font-size:12.5px; }
+
   @media (max-width:600px){
     .card{ padding:22px 18px; }
     .topbar{ padding:14px 16px; }
@@ -302,6 +317,32 @@
    ============================================================ */
 const CONFIG_KEY = 'app-config';
 const BOOKINGS_KEY = 'app-bookings';
+const APPLICATIONS_KEY = 'app-applications';
+
+/* ------------------------------------------------------------
+   Application form constants
+   ------------------------------------------------------------ */
+function halfHourBlocks(startH, startM, endH, endM){
+  const blocks = [];
+  let h = startH, m = startM;
+  const pad = n => String(n).padStart(2,'0');
+  while(h < endH || (h === endH && m < endM)){
+    let nh = h, nm = m + 30;
+    if(nm >= 60){ nh += 1; nm -= 60; }
+    blocks.push(`${pad(h)}:${pad(m)} - ${pad(nh)}:${pad(nm)}`);
+    h = nh; m = nm;
+  }
+  return blocks;
+}
+const WEEKDAY_MORNING_BLOCKS = halfHourBlocks(5,30,8,30);
+const WEEKDAY_EVENING_BLOCKS = halfHourBlocks(17,0,23,0);
+const WEEKEND_BLOCKS = (() => {
+  const blocks = []; let h = 6;
+  while(h < 23){ blocks.push(`${String(h).padStart(2,'0')}:00 - ${String(h+1).padStart(2,'0')}:00`); h++; }
+  return blocks;
+})();
+const BACKUP_POWER_OPTIONS = ['Gasoline generator','Building generator','Car battery','Back-up UPS','Powerbank/Powerstation (30,000 mAh or above)','None'];
+const BACKUP_INTERNET_OPTIONS = ['Prepaid Wifi','Prepaid Network (SIM)','Spare internet provider','Unlimited Data Plan (Phone)','Router + Converter cable + Backup battery'];
 
 const SLOTS = [
   {time:'08:15', period:'AM'},
@@ -344,6 +385,22 @@ let gateBusy = false;
 
 let bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
 
+function freshApplyForm(){
+  return {
+    fullName:'', reference:'', platform:'', workedBefore:'', interviewedBefore:'', email:'',
+    education:'', certification:'',
+    verificationImageFile:null, verificationImageName:'',
+    weekdayMorning:[], weekdayEvening:[], weekend:[],
+    kakaoId:'', teachingExperience:'',
+    recordingFile:null, recordingName:'',
+    internetType:'', backupInternet:'',
+    computerOption:'', desktopBackupPower:'',
+    laptopDuration:'', laptopBackupPower:'', laptopBackupDuration:'',
+    error:'', busy:false, done:false
+  };
+}
+let applyForm = freshApplyForm();
+
 let adminTab = 'calendar';
 let calMonthOffset = 0;
 let datesMonthOffset = 0;
@@ -374,7 +431,15 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const fbStorage = firebase.storage();
 const KV_COLLECTION = 'kv';
+
+async function uploadApplicationFile(file, applicationId, fieldName){
+  const path = `applications/${applicationId}/${fieldName}_${Date.now()}_${file.name}`;
+  const ref = fbStorage.ref().child(path);
+  await ref.put(file);
+  return await ref.getDownloadURL();
+}
 
 const storage = {
   async get(key){
@@ -446,6 +511,27 @@ async function saveBookings(next){
     await storage.set(BOOKINGS_KEY, JSON.stringify(bookings));
   }catch(e){
     bookings = previous; // roll back — the write didn't actually stick
+    throw e;
+  }
+}
+
+let applications = [];
+async function loadApplications(){
+  try{
+    const res = await storage.get(APPLICATIONS_KEY);
+    applications = (res && res.value) ? JSON.parse(res.value) : [];
+  }catch(e){
+    applications = [];
+  }
+  return applications;
+}
+async function saveApplications(next){
+  const previous = applications;
+  applications = next;
+  try{
+    await storage.set(APPLICATIONS_KEY, JSON.stringify(applications));
+  }catch(e){
+    applications = previous;
     throw e;
   }
 }
@@ -748,7 +834,8 @@ function showNotionSelectOverlay(rows){
 
 function render(){
   const app = document.getElementById('app');
-  if(view==='gate') app.innerHTML = renderGate();
+  if(view==='apply') app.innerHTML = renderApplyPage();
+  else if(view==='gate') app.innerHTML = renderGate();
   else if(view==='book') app.innerHTML = renderTopbar(false) + renderBook();
   else if(view==='admin') app.innerHTML = renderTopbar(true) + renderAdmin();
   attachHandlers();
@@ -817,8 +904,138 @@ function renderGate(){
 }
 
 /* ============================================================
-   Applicant booking screens
+   Application (job application) screens
    ============================================================ */
+function renderApplyPage(){
+  if(applyForm.done) return renderApplyDone();
+  const f = applyForm;
+  const yesNoSelect = (id, val) => `
+    <select id="${id}">
+      <option value="" ${val===''?'selected':''}>Select…</option>
+      <option value="Yes" ${val==='Yes'?'selected':''}>Yes</option>
+      <option value="No" ${val==='No'?'selected':''}>No</option>
+    </select>`;
+  const checkboxGroup = (groupKey, options) => `
+    <div class="checkbox-grid">
+      ${options.map(opt => `
+        <label class="checkbox-item">
+          <input type="checkbox" data-cb-group="${groupKey}" value="${escapeHtml(opt)}" ${f[groupKey].includes(opt)?'checked':''}>
+          ${escapeHtml(opt)}
+        </label>`).join('')}
+    </div>`;
+  const fileDrop = (id, label, currentName) => `
+    <div class="file-drop">
+      ${label}
+      <input type="file" id="${id}">
+      ${currentName ? `<div class="fname">Selected: ${escapeHtml(currentName)}</div>` : ''}
+    </div>`;
+
+  const computerFollowUp = f.computerOption === 'Desktop' ? `
+    <div class="field">
+      <label>What kind of back-up power source do you have? (Desktop)</label>
+      <select id="desktopBackupPower">
+        <option value="">Select…</option>
+        ${BACKUP_POWER_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${f.desktopBackupPower===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}
+      </select>
+    </div>`
+  : (f.computerOption === 'Laptop' || f.computerOption === 'Both') ? `
+    <div class="field">
+      <label>How long does your laptop last when fully charged and unplugged?</label>
+      <input type="text" id="laptopDuration" placeholder="e.g. 3 hours" value="${escapeHtml(f.laptopDuration)}">
+    </div>
+    <div class="field">
+      <label>What kind of back-up power source do you have?</label>
+      <select id="laptopBackupPower">
+        <option value="">Select…</option>
+        ${BACKUP_POWER_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${f.laptopBackupPower===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>How long does the back-up power source last when fully charged?</label>
+      <input type="text" id="laptopBackupDuration" placeholder="e.g. 5 hours" value="${escapeHtml(f.laptopBackupDuration)}">
+    </div>`
+  : '';
+
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <h1 class="gate-title">Langdy Application Form</h1>
+      <p class="gate-sub">Langdy is looking for passionate and qualified home-based English tutors. Thank you for your interest — only shortlisted applicants will be contacted.</p>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Basic Information</div>
+        <div class="field"><label>Full Name</label><input type="text" id="af_fullName" value="${escapeHtml(f.fullName)}"></div>
+        <div class="field"><label>Reference — if referred by a current Langdy tutor, enter their tutor name (otherwise "N/A")</label><input type="text" id="af_reference" placeholder="Tutor name or N/A" value="${escapeHtml(f.reference)}"></div>
+        <div class="field"><label>What recruitment platform(s) did you use to apply? (e.g. LinkedIn, JobStreet)</label><input type="text" id="af_platform" value="${escapeHtml(f.platform)}"></div>
+        <div class="field"><label>Have you worked at Langdy as a tutor before?</label>${yesNoSelect('af_workedBefore', f.workedBefore)}</div>
+        <div class="field"><label>Have you ever had an interview with Langdy before?</label>${yesNoSelect('af_interviewedBefore', f.interviewedBefore)}</div>
+        <div class="field"><label>Email Address</label><input type="email" id="af_email" value="${escapeHtml(f.email)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Background</div>
+        <div class="field"><label>Education</label><input type="text" id="af_education" value="${escapeHtml(f.education)}"></div>
+        <div class="field"><label>Certification</label><input type="text" id="af_certification" value="${escapeHtml(f.certification)}"></div>
+        <div class="field">
+          <label>Verification Image (ID or certificate photo)</label>
+          ${fileDrop('af_verificationImage', 'Upload an image file', f.verificationImageName)}
+        </div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Availability (Philippine time)</div>
+        <div class="field"><label>Weekdays: 5:30 – 8:30 AM</label>${checkboxGroup('weekdayMorning', WEEKDAY_MORNING_BLOCKS)}</div>
+        <div class="field"><label>Weekdays: 17:00 – 23:00</label>${checkboxGroup('weekdayEvening', WEEKDAY_EVENING_BLOCKS)}</div>
+        <div class="field"><label>Weekends (minimum 3 hours total)</label>${checkboxGroup('weekend', WEEKEND_BLOCKS)}</div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Teaching</div>
+        <div class="field"><label>KakaoTalk ID</label><input type="text" id="af_kakaoId" value="${escapeHtml(f.kakaoId)}"></div>
+        <div class="field"><label>Describe your teaching experience</label><textarea id="af_teachingExperience">${escapeHtml(f.teachingExperience)}</textarea></div>
+        <div class="field">
+          <label>Voice Recording — read the provided paragraph aloud and upload as an MP3</label>
+          ${fileDrop('af_recording', 'Upload an MP3 file', f.recordingName)}
+        </div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Equipment &amp; Connectivity</div>
+        <div class="field">
+          <label>Main internet type</label>
+          <select id="af_internetType"><option value="">Select…</option>${['LAN','Fiber'].map(o=>`<option value="${o}" ${f.internetType===o?'selected':''}>${o}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>Backup internet option</label>
+          <select id="af_backupInternet"><option value="">Select…</option>${BACKUP_INTERNET_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${f.backupInternet===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>Computer option</label>
+          <select id="af_computerOption"><option value="">Select…</option>${['Desktop','Laptop','Both'].map(o=>`<option value="${o}" ${f.computerOption===o?'selected':''}>${o}</option>`).join('')}</select>
+        </div>
+        ${computerFollowUp}
+      </div>
+
+      ${f.error ? `<div class="error-text">${escapeHtml(f.error)}</div>` : ''}
+      <button class="btn btn-gold" id="applySubmitBtn" ${f.busy?'disabled':''}>${f.busy?'Submitting…':'Submit Application'}</button>
+    </div>
+  </div>`;
+}
+
+function renderApplyDone(){
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <div class="ticket">
+        <div class="ticket-eyebrow">Application Received</div>
+        <div class="ticket-name">Thank you, ${escapeHtml(applyForm.fullName)}!</div>
+        <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:6px 0 0;">We've received your application. Only shortlisted applicants will be contacted — processing may take 2–3 business days.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+
 function renderBook(){
   if(bk.done) return renderBookDone();
   const stepHtml = bk.step===1 ? renderStepDate()
@@ -995,6 +1212,7 @@ function renderChatPanel(bookingId, viewerRole){
    ============================================================ */
 function renderAdmin(){
   const tabs = [
+    ['applications','Applications'],
     ['calendar','Calendar'],
     ['list','List'],
     ['dates','Availability'],
@@ -1006,7 +1224,8 @@ function renderAdmin(){
   ).join('');
 
   let body = '';
-  if(adminTab==='calendar') body = renderAdminCalendar();
+  if(adminTab==='applications') body = renderAdminApplications();
+  else if(adminTab==='calendar') body = renderAdminCalendar();
   else if(adminTab==='list') body = renderAdminList();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
@@ -1078,6 +1297,72 @@ function notionRowFields(b){
   // Column order matches the Notion "1st Demo" tracker: Contact Date, Stage, 1st Demo P/F, Name, Status, Assign, 1st Demo Date, Time
   return [contactDateStr, '1st Demo', '', b.fullName, 'Not confirmed yet', '', demoDateStr, b.time + ' PHT'];
 }
+let applicationDetailTarget = null;
+
+function renderAdminApplications(){
+  const sorted = [...applications].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  if(sorted.length === 0){
+    return `<div class="card"><div class="empty-state">No applications yet.</div></div>`;
+  }
+  const rows = sorted.map(a => `
+    <tr>
+      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span></td>
+      <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
+      <td>${a.status==='invited' ? '<span class="unread-badge" style="background:var(--success);">Invited</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
+          <button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Send Invite</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `
+  <div class="card">
+    <table class="list-table">
+      <thead><tr><th>Applicant</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  ${applicationDetailTarget ? renderApplicationDetailModal() : ''}`;
+}
+
+function renderApplicationDetailModal(){
+  const a = applications.find(x => x.id === applicationDetailTarget) || {};
+  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+  return `
+  <div class="modal-overlay" id="appDetailOverlay">
+    <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
+      <h3>${escapeHtml(a.fullName)}</h3>
+      ${row('Email', a.email)}
+      ${row('Reference', a.reference)}
+      ${row('Platform', a.platform)}
+      ${row('Worked at Langdy before', a.workedBefore)}
+      ${row('Interviewed before', a.interviewedBefore)}
+      ${row('Education', a.education)}
+      ${row('Certification', a.certification)}
+      ${linkRow('Verification image', a.verificationImageUrl)}
+      ${row('Weekday AM slots', (a.weekdayMorning||[]).join(', '))}
+      ${row('Weekday PM slots', (a.weekdayEvening||[]).join(', '))}
+      ${row('Weekend slots', (a.weekend||[]).join(', '))}
+      ${row('KakaoTalk ID', a.kakaoId)}
+      ${row('Teaching experience', a.teachingExperience)}
+      ${linkRow('Voice recording', a.recordingUrl)}
+      ${row('Internet type', a.internetType)}
+      ${row('Backup internet', a.backupInternet)}
+      ${row('Computer option', a.computerOption)}
+      ${row('Desktop backup power', a.desktopBackupPower)}
+      ${row('Laptop duration', a.laptopDuration)}
+      ${row('Laptop backup power', a.laptopBackupPower)}
+      ${row('Laptop backup duration', a.laptopBackupDuration)}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="appDetailCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+
 function renderAdminList(){
   const allDates = Array.from(new Set(bookings.map(b=>b.date))).sort();
   const filtered = listDateFilter==='all' ? bookings : bookings.filter(b=>b.date===listDateFilter);
@@ -1299,6 +1584,112 @@ function attachHandlers(){
     render();
   };
 
+  if(view==='apply' && !applyForm.done){
+    const f = applyForm;
+    const bindText = (id, key) => { const el = $(id); if(el) el.oninput = e => { f[key] = e.target.value; }; };
+    bindText('#af_fullName','fullName');
+    bindText('#af_reference','reference');
+    bindText('#af_platform','platform');
+    bindText('#af_email','email');
+    bindText('#af_education','education');
+    bindText('#af_certification','certification');
+    bindText('#af_kakaoId','kakaoId');
+    bindText('#af_teachingExperience','teachingExperience');
+    bindText('#af_laptopDuration','laptopDuration');
+    bindText('#af_laptopBackupDuration','laptopBackupDuration');
+
+    const bindSelect = (id, key, rerender) => {
+      const el = $(id); if(!el) return;
+      el.onchange = e => { f[key] = e.target.value; if(rerender) render(); };
+    };
+    bindSelect('#af_workedBefore','workedBefore', false);
+    bindSelect('#af_interviewedBefore','interviewedBefore', false);
+    bindSelect('#af_internetType','internetType', false);
+    bindSelect('#af_backupInternet','backupInternet', false);
+    bindSelect('#af_computerOption','computerOption', true);
+    bindSelect('#af_desktopBackupPower','desktopBackupPower', false);
+    bindSelect('#af_laptopBackupPower','laptopBackupPower', false);
+
+    $$('[data-cb-group]').forEach(el => {
+      el.onchange = e => {
+        const group = el.dataset.cbGroup;
+        const val = el.value;
+        const arr = f[group];
+        const idx = arr.indexOf(val);
+        if(el.checked && idx === -1) arr.push(val);
+        if(!el.checked && idx !== -1) arr.splice(idx,1);
+      };
+    });
+
+    const imgInput = $('#af_verificationImage');
+    if(imgInput) imgInput.onchange = e => {
+      const file = e.target.files[0];
+      f.verificationImageFile = file || null;
+      f.verificationImageName = file ? file.name : '';
+      render();
+    };
+    const recInput = $('#af_recording');
+    if(recInput) recInput.onchange = e => {
+      const file = e.target.files[0];
+      f.recordingFile = file || null;
+      f.recordingName = file ? file.name : '';
+      render();
+    };
+
+    const submitBtn = $('#applySubmitBtn');
+    if(submitBtn) submitBtn.onclick = async () => {
+      f.error = '';
+      if(!f.fullName.trim() || !f.email.trim()){
+        f.error = 'Please fill in at least your full name and email.'; render(); return;
+      }
+      f.busy = true; render();
+      try{
+        const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        let verificationImageUrl = '';
+        let recordingUrl = '';
+        if(f.verificationImageFile){
+          verificationImageUrl = await uploadApplicationFile(f.verificationImageFile, applicationId, 'verification');
+        }
+        if(f.recordingFile){
+          recordingUrl = await uploadApplicationFile(f.recordingFile, applicationId, 'recording');
+        }
+        const record = {
+          id: applicationId,
+          fullName: f.fullName.trim(),
+          reference: f.reference.trim(),
+          platform: f.platform.trim(),
+          workedBefore: f.workedBefore,
+          interviewedBefore: f.interviewedBefore,
+          email: f.email.trim(),
+          education: f.education.trim(),
+          certification: f.certification.trim(),
+          verificationImageUrl,
+          weekdayMorning: f.weekdayMorning,
+          weekdayEvening: f.weekdayEvening,
+          weekend: f.weekend,
+          kakaoId: f.kakaoId.trim(),
+          teachingExperience: f.teachingExperience.trim(),
+          recordingUrl,
+          internetType: f.internetType,
+          backupInternet: f.backupInternet,
+          computerOption: f.computerOption,
+          desktopBackupPower: f.desktopBackupPower,
+          laptopDuration: f.laptopDuration.trim(),
+          laptopBackupPower: f.laptopBackupPower,
+          laptopBackupDuration: f.laptopBackupDuration.trim(),
+          submittedAt: new Date().toISOString(),
+          status: 'new' // 'new' | 'invited'
+        };
+        await loadApplications();
+        await saveApplications([...applications, record]);
+        f.busy = false; f.done = true; render();
+      }catch(e){
+        f.busy = false;
+        f.error = 'Something went wrong submitting your application. Please try again.'; render();
+      }
+    };
+  }
+
   if(view==='gate'){
     if(gateMode==='code'){
       const submit = async () => {
@@ -1307,6 +1698,7 @@ function attachHandlers(){
         gateBusy = true; gateError=''; render();
         await loadBookings();
         if(val === config.adminCode){
+          await loadApplications();
           view='admin'; gateBusy=false; render();
         } else if(val === config.applicantCode){
           view='book'; gateBusy=false; render();
@@ -1473,6 +1865,55 @@ function attachHandlers(){
     $$('.admin-tab').forEach(el=>{
       el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
+
+    if(adminTab==='applications'){
+      $$('[data-view-app]').forEach(el=>{
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+      });
+      $$('[data-invite-app]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.inviteApp;
+          const a = applications.find(x=>x.id===id);
+          if(!a) return;
+          const bookingUrl = window.location.origin + window.location.pathname;
+          const subject = "You're invited to schedule your 1st Demo — Langdy";
+          const body = `Hi ${a.fullName},
+
+Congratulations! You've been selected to move forward with your 1st Demo class.
+
+Please use the access code below to book your interview slot:
+
+Access Code: ${config.applicantCode}
+
+Booking link: ${bookingUrl}
+
+Steps:
+1. Open the link above.
+2. Enter the access code.
+3. Choose an available date and time that works for you.
+4. Confirm your booking, then send us a quick message in the chat right there on the page to confirm you're coming.
+
+We look forward to your demo!
+
+Best,
+Langdy Team`;
+          const mailto = `mailto:${encodeURIComponent(a.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+          window.location.href = mailto;
+          await loadApplications();
+          const idx = applications.findIndex(x=>x.id===id);
+          if(idx !== -1){
+            const updated = Object.assign({}, applications[idx], { status:'invited' });
+            const next = [...applications]; next[idx] = updated;
+            await saveApplications(next);
+            render();
+          }
+        };
+      });
+      if(applicationDetailTarget){
+        $('#appDetailCloseBtn').onclick = () => { applicationDetailTarget=null; render(); };
+        $('#appDetailOverlay').onclick = (e) => { if(e.target.id==='appDetailOverlay'){ applicationDetailTarget=null; render(); } };
+      }
+    }
 
     if(adminTab==='calendar'){
       $('#calPrev').onclick = () => { calMonthOffset--; render(); };
@@ -1664,8 +2105,9 @@ function attachHandlers(){
    Init
    ============================================================ */
 (async function init(){
-  await loadConfig();
-  await loadBookings();
+  const params = new URLSearchParams(window.location.search);
+  if(params.has('apply')) view = 'apply';
+  await Promise.all([loadConfig(), loadBookings()]);
   render();
 })();
 </script>
