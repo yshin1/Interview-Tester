@@ -895,6 +895,21 @@ function stopApplicationsPolling(){
   appsPollTimer = null;
 }
 
+let signupsPollTimer = null;
+function startSignupsPolling(){
+  if(signupsPollTimer) return;
+  signupsPollTimer = setInterval(async () => {
+    await loadAccountSignups();
+    if(view==='admin' && adminTab==='accountSignups' && !accountSignupDetailTarget && !deleteAccountSignupTarget && !isFormControlFocused()){
+      render();
+    }
+  }, 4000);
+}
+function stopSignupsPolling(){
+  if(signupsPollTimer) clearInterval(signupsPollTimer);
+  signupsPollTimer = null;
+}
+
 // Same idea, but for the 1st-demo bookings (Calendar/List tabs) — auto-refresh
 // so new bookings/chat activity show up without needing to log out/in again.
 // Skips re-rendering while any modal is open (edit, cancel, chat) so it
@@ -2675,6 +2690,7 @@ function attachHandlers(){
   if(logoutBtn) logoutBtn.onclick = () => {
     stopChatPolling();
     stopApplicationsPolling();
+    stopSignupsPolling();
     stopBookingsPolling();
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
     bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
@@ -3099,6 +3115,12 @@ function attachHandlers(){
       startApplicationsPolling();
     } else {
       stopApplicationsPolling();
+    }
+
+    if(adminTab==='accountSignups'){
+      startSignupsPolling();
+    } else {
+      stopSignupsPolling();
     }
 
     if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats'){
