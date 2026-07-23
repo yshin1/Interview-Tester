@@ -359,21 +359,21 @@ function renderResultSelect(dataAttr, id, currentValue){
 
 // Year/Month/Day dropdown trio — used instead of a native <input type="date">
 // so clicking anywhere opens a plain dropdown (no calendar-icon-only quirk).
-function renderDateDropdowns(yearAttr, monthAttr, dayAttr, id, currentDateStr){
-  const [cy,cm,cd] = (currentDateStr||'').split('-');
-  const now = new Date();
-  const years = [now.getFullYear(), now.getFullYear()+1];
-  const yearOpts = years.map(y=>`<option value="${y}" ${String(y)===cy?'selected':''}>${y}</option>`).join('');
-  const monthOpts = Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0'))
-    .map(m=>`<option value="${m}" ${m===cm?'selected':''}>${m}</option>`).join('');
-  const dayOpts = Array.from({length:31},(_,i)=>String(i+1).padStart(2,'0'))
-    .map(d=>`<option value="${d}" ${d===cd?'selected':''}>${d}</option>`).join('');
-  const selStyle = 'font-size:12.5px; padding:6px 6px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;';
-  return `<div style="display:flex; gap:4px;">
-    <select data-${yearAttr}="${id}" style="${selStyle}"><option value="">Year</option>${yearOpts}</select>
-    <select data-${monthAttr}="${id}" style="${selStyle}"><option value="">Mo</option>${monthOpts}</select>
-    <select data-${dayAttr}="${id}" style="${selStyle}"><option value="">Day</option>${dayOpts}</select>
-  </div>`;
+// Single dropdown of upcoming dates, styled the same way as the 1st Demo's
+// "Reassign slot" date picker (e.g. "Jul 24 (Fri)") — but including every day
+// of the week, not just weekdays, since 2nd Demo can be scheduled any day.
+function renderSingleDateSelect(dataAttr, id, currentDateStr){
+  const dates = upcomingDays(60);
+  const options = dates.map(d=>{
+    const ds = fmtDate(d);
+    return `<option value="${ds}" ${currentDateStr===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
+  }).join('');
+  const currentInList = dates.some(d=>fmtDate(d)===currentDateStr);
+  const extraOption = (currentDateStr && !currentInList) ? `<option value="${currentDateStr}" selected>${fmtDateLabel(currentDateStr)} (existing)</option>` : '';
+  const placeholder = currentDateStr ? '' : `<option value="">Select a date…</option>`;
+  return `<select data-${dataAttr}="${id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+    ${placeholder}${extraOption}${options}
+  </select>`;
 }
 
 // Default assignee rules for newly-created bookings:
@@ -822,6 +822,13 @@ function upcomingWeekdays(count){
     if(isWeekday(cur)) out.push(new Date(cur));
     cur.setDate(cur.getDate()+1);
   }
+  return out;
+}
+// Same idea as upcomingWeekdays, but includes every day (2nd Demo can be
+// scheduled on any day, not just weekdays like the 1st Demo booking slots).
+function upcomingDays(count){
+  const out=[]; let cur=new Date(); cur.setHours(0,0,0,0);
+  for(let i=0;i<count;i++){ out.push(new Date(cur)); cur.setDate(cur.getDate()+1); }
   return out;
 }
 function mondayOf(date){
@@ -1433,17 +1440,15 @@ function renderEditSecondDemoModal(){
       <div class="field">
         <label>Date</label>
         ${(() => {
-          const [cy,cm,cd] = (b.secondDemoDate||'').split('-');
-          const nowY = new Date().getFullYear();
-          const yearOpts = [nowY, nowY+1].map(y=>`<option value="${y}" ${String(y)===cy?'selected':''}>${y}</option>`).join('');
-          const monthOpts = Array.from({length:12},(_,i)=>String(i+1).padStart(2,'0')).map(m=>`<option value="${m}" ${m===cm?'selected':''}>${m}</option>`).join('');
-          const dayOpts = Array.from({length:31},(_,i)=>String(i+1).padStart(2,'0')).map(d=>`<option value="${d}" ${d===cd?'selected':''}>${d}</option>`).join('');
-          const selStyle = 'flex:1; padding:11px 8px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;';
-          return `<div style="display:flex; gap:6px;">
-            <select id="esdYear" style="${selStyle}"><option value="">Year</option>${yearOpts}</select>
-            <select id="esdMonth" style="${selStyle}"><option value="">Mo</option>${monthOpts}</select>
-            <select id="esdDay" style="${selStyle}"><option value="">Day</option>${dayOpts}</select>
-          </div>`;
+          const dates = upcomingDays(60);
+          const options = dates.map(d=>{
+            const ds = fmtDate(d);
+            return `<option value="${ds}" ${b.secondDemoDate===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
+          }).join('');
+          const currentInList = dates.some(d=>fmtDate(d)===b.secondDemoDate);
+          const extraOption = (b.secondDemoDate && !currentInList) ? `<option value="${b.secondDemoDate}" selected>${fmtDateLabel(b.secondDemoDate)} (existing)</option>` : '';
+          const placeholder = b.secondDemoDate ? '' : `<option value="">Select a date…</option>`;
+          return `<select id="esdDate" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${extraOption}${options}</select>`;
         })()}
       </div>
       <div class="field">
@@ -1806,7 +1811,7 @@ function renderAdminSecondDemo(){
           ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.secondDemoAssignedTo===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </td>
-      <td>${renderDateDropdowns('2nd-year-id','2nd-month-id','2nd-day-id', b.id, b.secondDemoDate||'')}</td>
+      <td>${renderSingleDateSelect('2nd-date-id', b.id, b.secondDemoDate||'')}</td>
       <td>
         ${(() => {
           const [curH, curM] = (b.secondDemoTime||'').split(':');
@@ -2600,32 +2605,17 @@ Langdy Team`;
           render();
         };
       });
-      const updateSecondDemoDate = async (id) => {
-        const yearEl = document.querySelector(`[data-2nd-year-id="${id}"]`);
-        const monthEl = document.querySelector(`[data-2nd-month-id="${id}"]`);
-        const dayEl = document.querySelector(`[data-2nd-day-id="${id}"]`);
-        const y = yearEl ? yearEl.value : '';
-        const mo = monthEl ? monthEl.value : '';
-        const d = dayEl ? dayEl.value : '';
-        const combined = (y && mo && d) ? `${y}-${mo}-${d}` : '';
-        await loadBookings();
-        const idx = bookings.findIndex(x=>x.id===id);
-        if(idx===-1) return;
-        const updated = Object.assign({}, bookings[idx], { secondDemoDate: combined });
-        const next = [...bookings]; next[idx] = updated;
-        await saveBookings(next);
-        // Same lesson as the time dropdowns: only re-render once year+month+day
-        // are ALL chosen, or an incomplete selection would visually reset.
-        if(combined) render();
-      };
-      $$('[data-2nd-year-id]').forEach(el=>{
-        el.onchange = () => updateSecondDemoDate(el.dataset['2ndYearId']);
-      });
-      $$('[data-2nd-month-id]').forEach(el=>{
-        el.onchange = () => updateSecondDemoDate(el.dataset['2ndMonthId']);
-      });
-      $$('[data-2nd-day-id]').forEach(el=>{
-        el.onchange = () => updateSecondDemoDate(el.dataset['2ndDayId']);
+      $$('[data-2nd-date-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset['2ndDateId'];
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { secondDemoDate: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
       });
       const updateSecondDemoTime = async (id) => {
         const hourEl = document.querySelector(`[data-2nd-hour-id="${id}"]`);
@@ -2843,30 +2833,8 @@ Langdy Team`;
       };
       const assignSel = $('#esdAssign');
       if(assignSel) assignSel.onchange = () => saveField({ secondDemoAssignedTo: assignSel.value });
-      const updateEsdDate = () => {
-        const y = document.getElementById('esdYear').value;
-        const mo = document.getElementById('esdMonth').value;
-        const d = document.getElementById('esdDay').value;
-        const combined = (y && mo && d) ? `${y}-${mo}-${d}` : '';
-        if(combined){
-          saveField({ secondDemoDate: combined });
-        } else {
-          // Partial selection — save silently without re-render, same reasoning
-          // as everywhere else: re-rendering now would reset the other two
-          // dropdowns back to blank before the person finishes picking all three.
-          loadBookings().then(async () => {
-            const idx = bookings.findIndex(x=>x.id===editingSecondDemo.id);
-            if(idx===-1) return;
-            const updated = Object.assign({}, bookings[idx], { secondDemoDate: combined });
-            const next = [...bookings]; next[idx] = updated;
-            await saveBookings(next);
-            editingSecondDemo = updated;
-          });
-        }
-      };
-      const yearSel = $('#esdYear'); if(yearSel) yearSel.onchange = updateEsdDate;
-      const monthSel = $('#esdMonth'); if(monthSel) monthSel.onchange = updateEsdDate;
-      const daySel = $('#esdDay'); if(daySel) daySel.onchange = updateEsdDate;
+      const dateSel = $('#esdDate');
+      if(dateSel) dateSel.onchange = () => saveField({ secondDemoDate: dateSel.value });
       const resultSel = $('#esdResult');
       if(resultSel) resultSel.onchange = () => saveField({ secondDemoResult: resultSel.value });
       const updateTime = () => {
