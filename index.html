@@ -362,17 +362,34 @@ function renderResultSelect(dataAttr, id, currentValue){
 // Single dropdown of upcoming dates, styled the same way as the 1st Demo's
 // "Reassign slot" date picker (e.g. "Jul 24 (Fri)") — but including every day
 // of the week, not just weekdays, since 2nd Demo can be scheduled any day.
+// 15-minute increments from 09:00 through 23:45, for the 2nd Demo time picker.
+const TIME_15MIN_OPTIONS = (() => {
+  const out = [];
+  for(let h=9; h<24; h++){
+    for(let m=0; m<60; m+=15){
+      out.push(String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'));
+    }
+  }
+  return out;
+})();
+function renderSingleTimeSelect(dataAttr, id, currentValue){
+  const options = TIME_15MIN_OPTIONS.map(t=>`<option value="${t}" ${currentValue===t?'selected':''}>${t}</option>`).join('');
+  const placeholder = currentValue ? '' : `<option value="">Select a time…</option>`;
+  return `<select data-${dataAttr}="${id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+    ${placeholder}${options}
+  </select>`;
+}
+
+
 function renderSingleDateSelect(dataAttr, id, currentDateStr){
   const dates = upcomingDays(60);
   const options = dates.map(d=>{
     const ds = fmtDate(d);
     return `<option value="${ds}" ${currentDateStr===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
   }).join('');
-  const currentInList = dates.some(d=>fmtDate(d)===currentDateStr);
-  const extraOption = (currentDateStr && !currentInList) ? `<option value="${currentDateStr}" selected>${fmtDateLabel(currentDateStr)} (existing)</option>` : '';
   const placeholder = currentDateStr ? '' : `<option value="">Select a date…</option>`;
   return `<select data-${dataAttr}="${id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
-    ${placeholder}${extraOption}${options}
+    ${placeholder}${options}
   </select>`;
 }
 
@@ -1421,11 +1438,6 @@ let editingSecondDemo = null; // booking whose 2nd Demo schedule modal is open
 
 function renderEditSecondDemoModal(){
   const b = bookings.find(x => x.id === editingSecondDemo.id) || editingSecondDemo;
-  const [curH, curM] = (b.secondDemoTime||'').split(':');
-  const hourOptions = Array.from({length:24}, (_,h) => String(h).padStart(2,'0'))
-    .map(h => `<option value="${h}" ${curH===h?'selected':''}>${h}</option>`).join('');
-  const minuteOptions = ['00','15','30','45']
-    .map(m => `<option value="${m}" ${curM===m?'selected':''}>${m}</option>`).join('');
   return `
   <div class="modal-overlay" id="esdOverlay">
     <div class="modal" style="max-width:440px;">
@@ -1445,19 +1457,17 @@ function renderEditSecondDemoModal(){
             const ds = fmtDate(d);
             return `<option value="${ds}" ${b.secondDemoDate===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
           }).join('');
-          const currentInList = dates.some(d=>fmtDate(d)===b.secondDemoDate);
-          const extraOption = (b.secondDemoDate && !currentInList) ? `<option value="${b.secondDemoDate}" selected>${fmtDateLabel(b.secondDemoDate)} (existing)</option>` : '';
           const placeholder = b.secondDemoDate ? '' : `<option value="">Select a date…</option>`;
-          return `<select id="esdDate" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${extraOption}${options}</select>`;
+          return `<select id="esdDate" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
         })()}
       </div>
       <div class="field">
         <label>Time (KST)</label>
-        <div style="display:flex; align-items:center; gap:6px;">
-          <select id="esdHour" style="flex:1; padding:11px 8px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;"><option value="">--</option>${hourOptions}</select>
-          <span>:</span>
-          <select id="esdMinute" style="flex:1; padding:11px 8px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;"><option value="">--</option>${minuteOptions}</select>
-        </div>
+        ${(() => {
+          const options = TIME_15MIN_OPTIONS.map(t=>`<option value="${t}" ${(b.secondDemoTime||'')===t?'selected':''}>${t}</option>`).join('');
+          const placeholder = b.secondDemoTime ? '' : `<option value="">Select a time…</option>`;
+          return `<select id="esdTime" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
+        })()}
       </div>
       <div class="field">
         <label>2nd Demo Result</label>
@@ -1812,24 +1822,7 @@ function renderAdminSecondDemo(){
         </select>
       </td>
       <td>${renderSingleDateSelect('2nd-date-id', b.id, b.secondDemoDate||'')}</td>
-      <td>
-        ${(() => {
-          const [curH, curM] = (b.secondDemoTime||'').split(':');
-          const hourOptions = Array.from({length:24}, (_,h) => String(h).padStart(2,'0'))
-            .map(h => `<option value="${h}" ${curH===h?'selected':''}>${h}</option>`).join('');
-          const minuteOptions = ['00','15','30','45']
-            .map(m => `<option value="${m}" ${curM===m?'selected':''}>${m}</option>`).join('');
-          return `<div style="display:flex; align-items:center; gap:4px;">
-            <select data-2nd-hour-id="${b.id}" style="font-size:12.5px; padding:6px 6px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
-              <option value="">--</option>${hourOptions}
-            </select>
-            <span style="color:var(--slate-light);">:</span>
-            <select data-2nd-minute-id="${b.id}" style="font-size:12.5px; padding:6px 6px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
-              <option value="">--</option>${minuteOptions}
-            </select>
-          </div>`;
-        })()}
-      </td>
+      <td>${renderSingleTimeSelect('2nd-time-id', b.id, b.secondDemoTime||'')}</td>
       <td>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
       <td>
         <div class="row-actions">
@@ -2617,30 +2610,17 @@ Langdy Team`;
           render();
         };
       });
-      const updateSecondDemoTime = async (id) => {
-        const hourEl = document.querySelector(`[data-2nd-hour-id="${id}"]`);
-        const minuteEl = document.querySelector(`[data-2nd-minute-id="${id}"]`);
-        const h = hourEl ? hourEl.value : '';
-        const m = minuteEl ? minuteEl.value : '';
-        const combined = (h && m) ? `${h}:${m}` : '';
-        await loadBookings();
-        const idx = bookings.findIndex(x=>x.id===id);
-        if(idx===-1) return;
-        const updated = Object.assign({}, bookings[idx], { secondDemoTime: combined });
-        const next = [...bookings]; next[idx] = updated;
-        await saveBookings(next);
-        // Only re-render once BOTH hour and minute are chosen. If we re-rendered
-        // after just the hour was picked (with minute still blank), the whole
-        // row gets regenerated from data — and since the combined time is still
-        // empty at that point, it would visually reset the hour back to blank
-        // before the person ever gets to pick the minute.
-        if(combined) render();
-      };
-      $$('[data-2nd-hour-id]').forEach(el=>{
-        el.onchange = () => updateSecondDemoTime(el.dataset['2ndHourId']);
-      });
-      $$('[data-2nd-minute-id]').forEach(el=>{
-        el.onchange = () => updateSecondDemoTime(el.dataset['2ndMinuteId']);
+      $$('[data-2nd-time-id]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset['2ndTimeId'];
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { secondDemoTime: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
       });
       $$('[data-2nd-assign-id]').forEach(el=>{
         el.onchange = async () => {
@@ -2837,29 +2817,8 @@ Langdy Team`;
       if(dateSel) dateSel.onchange = () => saveField({ secondDemoDate: dateSel.value });
       const resultSel = $('#esdResult');
       if(resultSel) resultSel.onchange = () => saveField({ secondDemoResult: resultSel.value });
-      const updateTime = () => {
-        const h = document.getElementById('esdHour').value;
-        const m = document.getElementById('esdMinute').value;
-        const combined = (h && m) ? `${h}:${m}` : '';
-        if(combined) saveField({ secondDemoTime: combined });
-        else{
-          // Partial selection (only hour or only minute chosen) — save silently
-          // without re-rendering, same reasoning as the 2nd Demo tab's version:
-          // re-rendering now would reset both dropdowns back to blank before
-          // the person finishes picking both.
-          loadBookings().then(async () => {
-            const idx = bookings.findIndex(x=>x.id===editingSecondDemo.id);
-            if(idx===-1) return;
-            const updated = Object.assign({}, bookings[idx], { secondDemoTime: combined });
-            const next = [...bookings]; next[idx] = updated;
-            await saveBookings(next);
-          });
-        }
-      };
-      const hourSel = $('#esdHour');
-      if(hourSel) hourSel.onchange = updateTime;
-      const minuteSel = $('#esdMinute');
-      if(minuteSel) minuteSel.onchange = updateTime;
+      const timeSel = $('#esdTime');
+      if(timeSel) timeSel.onchange = () => saveField({ secondDemoTime: timeSel.value });
       $('#esdCloseBtn').onclick = () => { editingSecondDemo = null; render(); };
       $('#esdOverlay').onclick = (e) => { if(e.target.id==='esdOverlay'){ editingSecondDemo=null; render(); } };
       $('#esdChatBtn').onclick = async () => {
