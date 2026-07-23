@@ -694,10 +694,42 @@ async function saveConfig(next){
     throw e;
   }
 }
+const BOOKINGS_COLLECTION = 'bookings';
+
+// Same loadBookings()/saveBookings(next) signatures as before — every
+// existing call site throughout the app keeps working unchanged. Internally,
+// though, this now stores one Firestore document PER BOOKING instead of one
+// giant array in a single document. That was the actual bottleneck behind
+// the concurrency test results: a single hot document can only sustain
+// ~1 write/sec before Firestore starts throttling/erroring, and every
+// booking creation, chat message, and admin edit was hitting that same
+// document. Splitting into one-doc-per-booking removes that contention
+// almost entirely (each booking's writes are now isolated).
 async function loadBookings(){
   try{
-    const res = await storage.get(BOOKINGS_KEY);
-    bookings = (res && res.value) ? JSON.parse(res.value) : [];
+    const snap = await db.collection(BOOKINGS_COLLECTION).get();
+    bookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+    if(bookings.length === 0){
+      // One-time, automatic migration: if the old single-document blob still
+      // has data and the new collection is empty, copy it over. Safe to run
+      // every time the collection happens to be empty — once migrated, the
+      // collection is no longer empty, so this never re-runs.
+      try{
+        const legacy = await storage.get(BOOKINGS_KEY);
+        if(legacy && legacy.value){
+          const legacyBookings = JSON.parse(legacy.value);
+          if(Array.isArray(legacyBookings) && legacyBookings.length > 0){
+            const batch = db.batch();
+            legacyBookings.forEach(b => {
+              const { id, ...data } = b;
+              batch.set(db.collection(BOOKINGS_COLLECTION).doc(id), data);
+            });
+            await batch.commit();
+            bookings = legacyBookings;
+          }
+        }
+      }catch(e){ /* no legacy data to migrate — that's fine */ }
+    }
   }catch(e){
     bookings = [];
   }
@@ -705,9 +737,25 @@ async function loadBookings(){
 }
 async function saveBookings(next){
   const previous = bookings;
+  // Diff against what we had before, so we only touch the documents that
+  // actually changed (or got added/removed) — not every booking every time.
+  const nextIds = new Set(next.map(b=>b.id));
+  const toDelete = previous.filter(b => !nextIds.has(b.id));
+  const toUpsert = next.filter(b => {
+    const old = previous.find(p=>p.id===b.id);
+    return !old || JSON.stringify(old) !== JSON.stringify(b);
+  });
   bookings = next; // optimistic update for instant UI feedback
   try{
-    await storage.set(BOOKINGS_KEY, JSON.stringify(bookings));
+    const batch = db.batch();
+    toUpsert.forEach(b => {
+      const { id, ...data } = b;
+      batch.set(db.collection(BOOKINGS_COLLECTION).doc(id), data);
+    });
+    toDelete.forEach(b => {
+      batch.delete(db.collection(BOOKINGS_COLLECTION).doc(b.id));
+    });
+    await batch.commit();
   }catch(e){
     bookings = previous; // roll back — the write didn't actually stick
     throw e;
