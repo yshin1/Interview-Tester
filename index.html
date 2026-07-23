@@ -2045,6 +2045,7 @@ function renderAdminSecondDemo(){
 
 
 let onboardingStatusFilter = 'all'; // 'all' | one of ONBOARDING_STATUS_OPTIONS
+let onboardingDeviceMissingFilter = false;
 let signupStatusTarget = null; // booking id whose signup-status memo popup is open
 
 function renderSignupStatusModal(){
@@ -2165,7 +2166,8 @@ function renderSignupStatusModal(){
 
 function renderAdminOnboarding(){
   const passed = bookings.filter(b => b.secondDemoResult === 'pass');
-  const filtered = onboardingStatusFilter==='all' ? passed : passed.filter(b => (b.onboardingStatus||'')===onboardingStatusFilter);
+  let filtered = onboardingStatusFilter==='all' ? passed : passed.filter(b => (b.onboardingStatus||'')===onboardingStatusFilter);
+  if(onboardingDeviceMissingFilter) filtered = filtered.filter(b => b.deviceBackupPower==='미보유' || b.deviceBackupInternet==='미보유');
   if(passed.length === 0){
     return `<div class="card"><div class="empty-state">No one has passed the 2nd Demo yet. Mark someone as "Pass" in the 2nd Demo tab's 2nd Demo Result column and they'll show up here.</div></div>`;
   }
@@ -2174,6 +2176,8 @@ function renderAdminOnboarding(){
     const kb = b.onboardingDate ? b.onboardingDate+' '+(b.onboardingTime||'') : '9999';
     return ka.localeCompare(kb);
   });
+
+  const deviceMissingCount = passed.filter(b => b.deviceBackupPower==='미보유' || b.deviceBackupInternet==='미보유').length;
 
   const statusFilterOptions = `<option value="all" ${onboardingStatusFilter==='all'?'selected':''}>All (${passed.length})</option>` +
     ONBOARDING_STATUS_OPTIONS.map(s=>`<option value="${s}" ${onboardingStatusFilter===s?'selected':''}>${s} (${passed.filter(b=>b.onboardingStatus===s).length})</option>`).join('');
@@ -2212,6 +2216,10 @@ function renderAdminOnboarding(){
       <select id="onboardingFilterSelect" style="max-width:200px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         ${statusFilterOptions}
       </select>
+      <label class="checkbox-item" style="cursor:pointer;">
+        <input type="checkbox" id="onboardingDeviceMissingToggle" ${onboardingDeviceMissingFilter?'checked':''}>
+        🔌 Needs re-contact — device missing (${deviceMissingCount})
+      </label>
     </div>
     <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 2nd Demo Result show up here. If entered by mistake, change it back in the "2nd Demo Result" column below and they'll return to the 2nd Demo tab.</p>
     <table class="list-table">
@@ -3066,6 +3074,8 @@ Langdy Team`;
     if(adminTab==='onboarding'){
       const filterSel = $('#onboardingFilterSelect');
       if(filterSel) filterSel.onchange = () => { onboardingStatusFilter = filterSel.value; render(); };
+      const deviceMissingToggle = $('#onboardingDeviceMissingToggle');
+      if(deviceMissingToggle) deviceMissingToggle.onchange = () => { onboardingDeviceMissingFilter = deviceMissingToggle.checked; render(); };
       $$('[data-2nd-result-id]').forEach(el=>{
         el.onchange = async () => {
           const id = el.dataset['2ndResultId'];
