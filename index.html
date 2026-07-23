@@ -343,6 +343,7 @@ const WEEKEND_BLOCKS = (() => {
 const BACKUP_POWER_OPTIONS = ['Gasoline generator','Building generator','Car battery','Back-up UPS','Powerbank/Powerstation (30,000 mAh or above)','None'];
 const ASSIGNEE_OPTIONS = ['Lyn','Sabrina','Soo','Julia','Elena'];
 const ONBOARDING_STATUS_OPTIONS = ['계정 생성','OT','Scheduling','NTT'];
+const SIGNUP_STATUS_OPTIONS = ['예정','제출 완료','가입 완료'];
 
 // Shared result options for both 1st and 2nd Demo result dropdowns.
 const DEMO_RESULT_OPTIONS = [
@@ -784,7 +785,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -1805,7 +1806,7 @@ function renderAdminChats(){
 
 
 function renderAdminSecondDemo(){
-  const passed = bookings.filter(b => b.demoResult === 'pass');
+  const passed = bookings.filter(b => b.demoResult === 'pass' && b.secondDemoResult !== 'pass'); // 2nd-demo-passers move to Onboarding only
   if(passed.length === 0){
     return `<div class="card"><div class="empty-state">No one has passed the 1st Demo yet. Mark someone as "Pass" in the List tab's 1st Demo Result column and they'll show up here.</div></div>`;
   }
@@ -1847,6 +1848,30 @@ function renderAdminSecondDemo(){
 
 
 let onboardingStatusFilter = 'all'; // 'all' | one of ONBOARDING_STATUS_OPTIONS
+let signupStatusTarget = null; // booking id whose signup-status memo popup is open
+
+function renderSignupStatusModal(){
+  const b = bookings.find(x => x.id === signupStatusTarget);
+  if(!b) return '';
+  return `
+  <div class="modal-overlay" id="signupStatusOverlay">
+    <div class="modal" style="max-width:380px;">
+      <h3>Signup Status — ${escapeHtml(b.fullName)}</h3>
+      <p class="section-desc" style="margin-bottom:10px;">Track where this person is in the Langdy tutor account signup process.</p>
+      <div class="field">
+        <label>Status</label>
+        <select id="signupStatusSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.signupStatus?'selected':''}>—</option>
+          ${SIGNUP_STATUS_OPTIONS.map(s=>`<option value="${s}" ${b.signupStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="signupStatusCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 
 function renderAdminOnboarding(){
   const passed = bookings.filter(b => b.secondDemoResult === 'pass');
@@ -1885,6 +1910,7 @@ function renderAdminOnboarding(){
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unreadCountForAdmin(b)>0?`<span class="unread-badge">${unreadCountForAdmin(b)}</span>`:''}</button>
           <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
+          <button class="btn btn-ghost btn-sm" data-signup-status-id="${b.id}">🪪 Signup${b.signupStatus?': '+escapeHtml(b.signupStatus):''}</button>
         </div>
       </td>
     </tr>`).join('');
@@ -1903,7 +1929,8 @@ function renderAdminOnboarding(){
       <tbody>${rows}</tbody>
     </table>
   </div>
-  ${notesTarget ? renderNotesModal() : ''}`;
+  ${notesTarget ? renderNotesModal() : ''}
+  ${signupStatusTarget ? renderSignupStatusModal() : ''}`;
 }
 
 function renderAdminDates(){
@@ -2301,7 +2328,8 @@ function attachHandlers(){
               assignedTo: defaultAssigneeFor(bk.date, bk.time),
               onboardingStatus: '',
               onboardingDate: '',
-              onboardingTime: ''
+              onboardingTime: '',
+              signupStatus: ''
             };
             await saveBookings([...bookings, newBooking]);
             // Verify the write actually stuck — the shared storage is "last write wins",
@@ -2820,6 +2848,23 @@ Langdy Team`;
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           notesTarget = null;
+          render();
+        };
+      }
+      $$('[data-signup-status-id]').forEach(el=>{
+        el.onclick = () => { signupStatusTarget = el.dataset.signupStatusId; render(); };
+      });
+      if(signupStatusTarget){
+        $('#signupStatusCloseBtn').onclick = () => { signupStatusTarget=null; render(); };
+        $('#signupStatusOverlay').onclick = (e) => { if(e.target.id==='signupStatusOverlay'){ signupStatusTarget=null; render(); } };
+        const selectEl = $('#signupStatusSelect');
+        if(selectEl) selectEl.onchange = async () => {
+          await loadBookings();
+          const idx = bookings.findIndex(x=>x.id===signupStatusTarget);
+          if(idx===-1) return;
+          const updated = Object.assign({}, bookings[idx], { signupStatus: selectEl.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
           render();
         };
       }
