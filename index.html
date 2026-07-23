@@ -572,6 +572,27 @@ function freshSignupForm(){
 }
 let signupForm = freshSignupForm();
 
+function freshDeviceForm(){
+  return {
+    tutorName:'',
+    computerOption:'', laptopDuration:'',
+    hasPowerStation:'', backupPowerSources:[], backupPowerDuration:'',
+    powerStationSpec:'', powerStationConnection:'',
+    powerStationPhotoFile:null, powerStationPhotoFileName:'',
+    laptopExtraDuration:'',
+    outageFrequency:'', lastOutageDate:'', lastOutageDuration:'', outageBackupMethod:'',
+    mainInternetType:'', mainInternetProvider:'',
+    mainInternetSpeedtestFile:null, mainInternetSpeedtestFileName:'',
+    mainInternetUpload:'', mainInternetDownload:'',
+    backupInternetType:'', backupInternetProvider:'',
+    backupInternetSpeedtestFile:null, backupInternetSpeedtestFileName:'',
+    backupInternetUpload:'', backupInternetDownload:'',
+    headsetModel:'', noiseCancelSoftware:'',
+    error:'', busy:false, done:false
+  };
+}
+let deviceForm = freshDeviceForm();
+
 
 let adminTab = 'calendar';
 let calMonthOffset = 0;
@@ -740,6 +761,28 @@ async function saveOneAccountSignup(rec){
 async function deleteOneAccountSignup(id){
   await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
   accountSignups = accountSignups.filter(x => x.id !== id);
+}
+
+let deviceSubmissions = [];
+const DEVICE_SUBMISSIONS_COLLECTION = 'deviceSubmissions';
+async function loadDeviceSubmissions(){
+  try{
+    const snap = await db.collection(DEVICE_SUBMISSIONS_COLLECTION).get();
+    deviceSubmissions = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+  }catch(e){
+    deviceSubmissions = [];
+  }
+  return deviceSubmissions;
+}
+async function saveOneDeviceSubmission(rec){
+  const { id, ...data } = rec;
+  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).set(data);
+  const idx = deviceSubmissions.findIndex(x => x.id === id);
+  if(idx === -1) deviceSubmissions.push(rec); else deviceSubmissions[idx] = rec;
+}
+async function deleteOneDeviceSubmission(id){
+  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
+  deviceSubmissions = deviceSubmissions.filter(x => x.id !== id);
 }
 
 /* ============================================================
@@ -923,6 +966,21 @@ function startSignupsPolling(){
 function stopSignupsPolling(){
   if(signupsPollTimer) clearInterval(signupsPollTimer);
   signupsPollTimer = null;
+}
+
+let devicePollTimer = null;
+function startDevicePolling(){
+  if(devicePollTimer) return;
+  devicePollTimer = setInterval(async () => {
+    await loadDeviceSubmissions();
+    if(view==='admin' && adminTab==='deviceSubmissions' && !deviceSubmissionDetailTarget && !deleteDeviceSubmissionTarget && !isFormControlFocused()){
+      render();
+    }
+  }, 4000);
+}
+function stopDevicePolling(){
+  if(devicePollTimer) clearInterval(devicePollTimer);
+  devicePollTimer = null;
 }
 
 // Same idea, but for the 1st-demo bookings (Calendar/List tabs) — auto-refresh
@@ -1121,6 +1179,7 @@ function render(){
   const app = document.getElementById('app');
   if(view==='apply') app.innerHTML = renderApplyPage();
   else if(view==='signupForm') app.innerHTML = renderSignupFormPage();
+  else if(view==='deviceForm') app.innerHTML = renderDeviceFormPage();
   else if(view==='gate') app.innerHTML = renderGate();
   else if(view==='book') app.innerHTML = renderTopbar(false) + renderBook();
   else if(view==='admin') app.innerHTML = renderTopbar(true) + renderAdmin();
@@ -1442,6 +1501,132 @@ function renderSignupFormDone(){
   </div>`;
 }
 
+/* ============================================================
+   Device Submission form
+   ============================================================ */
+function renderDeviceFormPage(){
+  if(deviceForm.done) return renderDeviceFormDone();
+  const f = deviceForm;
+  const fileDrop = (id, label, currentName) => `
+    <div class="file-drop">
+      ${label}
+      <input type="file" id="${id}">
+      ${currentName ? `<div class="fname">Selected: ${escapeHtml(currentName)}</div>` : ''}
+    </div>`;
+
+  const powerStationFollowUp = f.hasPowerStation === 'Yes' ? `
+    <div class="field"><label>Please specify the number and total capacity of the power station(s) you have. (e.g. 1 / 50,000 mAh)</label><input type="text" id="df_powerStationSpec" value="${escapeHtml(f.powerStationSpec)}"></div>
+    <div class="field"><label>How do you connect your power station to your laptop?</label><input type="text" id="df_powerStationConnection" value="${escapeHtml(f.powerStationConnection)}"></div>
+    <div class="field">
+      <label>Please submit a photo of your laptop connected to your power station.</label>
+      ${fileDrop('df_powerStationPhoto', 'Upload an image file', f.powerStationPhotoFileName)}
+    </div>
+    <div class="field"><label>How much longer were you able to use your laptop when connected to the power station(s)? (e.g. 5 hours)</label><input type="text" id="df_laptopExtraDuration" value="${escapeHtml(f.laptopExtraDuration)}"></div>
+  ` : '';
+
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <h1 class="gate-title">Device Submission</h1>
+      <p class="gate-sub">Please complete this form so we can verify your computer, power, and internet setup.</p>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Computer</div>
+        <div class="field"><label>Please state your Langdy tutor name (e.g. Amy).</label><input type="text" id="df_tutorName" value="${escapeHtml(f.tutorName)}"></div>
+        <div class="field">
+          <label>Which computer option do you have?</label>
+          <select id="df_computerOption"><option value="">Select…</option>${['Desktop','Laptop','Both'].map(o=>`<option value="${o}" ${f.computerOption===o?'selected':''}>${o}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>If you have a laptop, how long does it last when fully charged and unplugged?</label><input type="text" id="df_laptopDuration" value="${escapeHtml(f.laptopDuration)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Backup Power Source</div>
+        <div class="field">
+          <label>Do you have a power station?</label>
+          <select id="df_hasPowerStation"><option value="">Select…</option><option value="Yes" ${f.hasPowerStation==='Yes'?'selected':''}>Yes</option><option value="No" ${f.hasPowerStation==='No'?'selected':''}>No</option></select>
+        </div>
+        <div class="field">
+          <label>Select ALL the backup power sources you have at the moment.</label>
+          <div class="checkbox-grid">
+            ${BACKUP_POWER_OPTIONS.map(opt => `
+              <label class="checkbox-item">
+                <input type="checkbox" data-df-cb-group="backupPowerSources" value="${escapeHtml(opt)}" ${f.backupPowerSources.includes(opt)?'checked':''}>
+                ${escapeHtml(opt)}
+              </label>`).join('')}
+          </div>
+        </div>
+        <div class="field"><label>When fully charged, what is the combined duration your backup power sources last until they are drained?</label><input type="text" id="df_backupPowerDuration" value="${escapeHtml(f.backupPowerDuration)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Power Station</div>
+        ${powerStationFollowUp || `<p class="section-desc">Answer "Yes" to "Do you have a power station?" above to fill in this section.</p>`}
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Power Outage</div>
+        <div class="field"><label>On average, how frequently do power outages occur in your province or city within a three-month period?</label><input type="text" id="df_outageFrequency" value="${escapeHtml(f.outageFrequency)}"></div>
+        <div class="field"><label>When did you last experience a power outage?</label><input type="text" id="df_lastOutageDate" value="${escapeHtml(f.lastOutageDate)}"></div>
+        <div class="field"><label>How long did the power outage last at that time?</label><input type="text" id="df_lastOutageDuration" value="${escapeHtml(f.lastOutageDuration)}"></div>
+        <div class="field"><label>How would you charge or power your computer in case of a power outage?</label><input type="text" id="df_outageBackupMethod" value="${escapeHtml(f.outageBackupMethod)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Main Internet</div>
+        <div class="field">
+          <label>What type of main internet do you have?</label>
+          <select id="df_mainInternetType"><option value="">Select…</option>${['LAN','Fiber'].map(o=>`<option value="${o}" ${f.mainInternetType===o?'selected':''}>${o}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>What is your main internet provider?</label><input type="text" id="df_mainInternetProvider" value="${escapeHtml(f.mainInternetProvider)}"></div>
+        <div class="field">
+          <label>Use <a href="https://www.speedtest.net/" target="_blank" rel="noopener">speedtest.net</a> and submit a screenshot of the upload/download speeds of your main internet.</label>
+          ${fileDrop('df_mainInternetSpeedtest', 'Upload an image file', f.mainInternetSpeedtestFileName)}
+        </div>
+        <div class="field"><label>Upload speed of your main internet (e.g. 71.93)</label><input type="text" id="df_mainInternetUpload" value="${escapeHtml(f.mainInternetUpload)}"></div>
+        <div class="field"><label>Download speed of your main internet (e.g. 86.01)</label><input type="text" id="df_mainInternetDownload" value="${escapeHtml(f.mainInternetDownload)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Backup Internet</div>
+        <div class="field">
+          <label>What type of backup internet do you have?</label>
+          <select id="df_backupInternetType"><option value="">Select…</option>${BACKUP_INTERNET_OPTIONS.map(o=>`<option value="${escapeHtml(o)}" ${f.backupInternetType===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>What is your backup internet provider?</label><input type="text" id="df_backupInternetProvider" value="${escapeHtml(f.backupInternetProvider)}"></div>
+        <div class="field">
+          <label>Use <a href="https://www.speedtest.net/" target="_blank" rel="noopener">speedtest.net</a> and submit a screenshot of the upload/download speeds of your backup internet.</label>
+          ${fileDrop('df_backupInternetSpeedtest', 'Upload an image file', f.backupInternetSpeedtestFileName)}
+        </div>
+        <div class="field"><label>Upload speed of your backup internet (e.g. 71.93)</label><input type="text" id="df_backupInternetUpload" value="${escapeHtml(f.backupInternetUpload)}"></div>
+        <div class="field"><label>Download speed of your backup internet (e.g. 86.01)</label><input type="text" id="df_backupInternetDownload" value="${escapeHtml(f.backupInternetDownload)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Noise-Canceling</div>
+        <div class="field"><label>What brand and model of noise-canceling headset with a mic are you currently using? (e.g. Blitz Hi-Fi Noise Cancelling Bluetooth Headphone - BT4000 ANC)</label><input type="text" id="df_headsetModel" value="${escapeHtml(f.headsetModel)}"></div>
+        <div class="field"><label>What kind of noise-cancelling software are you currently using?</label><input type="text" id="df_noiseCancelSoftware" value="${escapeHtml(f.noiseCancelSoftware)}"></div>
+      </div>
+
+      ${f.error ? `<div class="error-text">${escapeHtml(f.error)}</div>` : ''}
+      <button class="btn btn-gold" id="deviceSubmitBtn" ${f.busy?'disabled':''}>${f.busy?'Submitting…':'Submit'}</button>
+    </div>
+  </div>`;
+}
+
+function renderDeviceFormDone(){
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <div class="ticket">
+        <div class="ticket-eyebrow">Submission Received</div>
+        <div class="ticket-name">Thank you, ${escapeHtml(deviceForm.tutorName)}!</div>
+        <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:6px 0 0;">We've received your device submission. The admin will review it and follow up if anything else is needed.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 
 function renderBook(){
   if(bk.done) return renderBookDone();
@@ -1629,7 +1814,8 @@ const TAB_GROUPS = [
   },
   { label: 'Onboarding', children: [
       ['onboarding','Onboarding'],
-      ['accountSignups','Account Signups']
+      ['accountSignups','Account Signups'],
+      ['deviceSubmissions','Device']
     ]
   },
   { label: 'Chat', tab: 'chats' },
@@ -1662,6 +1848,7 @@ function renderAdmin(){
   else if(adminTab==='secondDemo') body = renderAdminSecondDemo();
   else if(adminTab==='onboarding') body = renderAdminOnboarding();
   else if(adminTab==='accountSignups') body = renderAdminAccountSignups();
+  else if(adminTab==='deviceSubmissions') body = renderAdminDeviceSubmissions();
   else if(adminTab==='chats') body = renderAdminChats();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
@@ -2066,6 +2253,110 @@ function renderDeleteAccountSignupModal(){
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deleteSignupNoBtn">Keep it</button>
         <button class="btn btn-danger-outline" id="deleteSignupYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+let deviceSubmissionDetailTarget = null;
+let deleteDeviceSubmissionTarget = null;
+
+function renderAdminDeviceSubmissions(){
+  const shareLinkBox = renderShareLinkBox('device', 'Device Submission link');
+  if(deviceSubmissions.length === 0){
+    return `<div class="card">${shareLinkBox}<div class="empty-state">No device submissions yet.</div></div>`;
+  }
+  const sorted = [...deviceSubmissions].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  const rows = sorted.map(s => `
+    <tr>
+      <td><strong>${escapeHtml(s.tutorName)}</strong></td>
+      <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
+      <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-view-device="${s.id}">View</button>
+          <button class="btn btn-danger-outline btn-sm" data-delete-device="${s.id}">Delete</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `
+  <div class="card">
+    ${shareLinkBox}
+    <table class="list-table">
+      <thead><tr><th>Tutor</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  ${deviceSubmissionDetailTarget ? renderDeviceSubmissionDetailModal() : ''}
+  ${deleteDeviceSubmissionTarget ? renderDeleteDeviceSubmissionModal() : ''}`;
+}
+
+function renderDeviceSubmissionDetailModal(){
+  const s = deviceSubmissions.find(x => x.id === deviceSubmissionDetailTarget) || {};
+  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+  return `
+  <div class="modal-overlay" id="deviceDetailOverlay">
+    <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
+      <h3>${escapeHtml(s.tutorName)}</h3>
+      <div class="section-title" style="font-size:13.5px;">Computer</div>
+      ${row('Computer option', s.computerOption)}
+      ${row('Laptop duration (unplugged)', s.laptopDuration)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Backup Power Source</div>
+      ${row('Has power station?', s.hasPowerStation)}
+      ${row('Backup power sources', (s.backupPowerSources||[]).join(', '))}
+      ${row('Backup power duration', s.backupPowerDuration)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Power Station</div>
+      ${row('Spec (number / capacity)', s.powerStationSpec)}
+      ${row('Connection method', s.powerStationConnection)}
+      ${linkRow('Photo (laptop + power station)', s.powerStationPhotoUrl)}
+      ${row('Extra laptop duration w/ power station', s.laptopExtraDuration)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Power Outage</div>
+      ${row('Outage frequency (per 3 months)', s.outageFrequency)}
+      ${row('Last outage', s.lastOutageDate)}
+      ${row('Last outage duration', s.lastOutageDuration)}
+      ${row('Backup method during outage', s.outageBackupMethod)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Main Internet</div>
+      ${row('Type', s.mainInternetType)}
+      ${row('Provider', s.mainInternetProvider)}
+      ${linkRow('Speedtest screenshot', s.mainInternetSpeedtestUrl)}
+      ${row('Upload speed', s.mainInternetUpload)}
+      ${row('Download speed', s.mainInternetDownload)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Backup Internet</div>
+      ${row('Type', s.backupInternetType)}
+      ${row('Provider', s.backupInternetProvider)}
+      ${linkRow('Speedtest screenshot', s.backupInternetSpeedtestUrl)}
+      ${row('Upload speed', s.backupInternetUpload)}
+      ${row('Download speed', s.backupInternetDownload)}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">Noise-Canceling</div>
+      ${row('Headset model', s.headsetModel)}
+      ${row('Software', s.noiseCancelSoftware)}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="deviceDetailCloseBtn">Close</button>
+        <button class="btn btn-primary" id="deviceMarkReviewedBtn">${s.reviewed?'Mark as New':'Mark as Reviewed'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDeleteDeviceSubmissionModal(){
+  const s = deviceSubmissions.find(x => x.id === deleteDeviceSubmissionTarget) || {};
+  return `
+  <div class="modal-overlay" id="deleteDeviceOverlay">
+    <div class="modal">
+      <h3>Delete this submission?</h3>
+      <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:0 0 4px;">
+        This will permanently remove <strong>${escapeHtml(s.tutorName)}</strong>'s device submission. This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="deleteDeviceNoBtn">Keep it</button>
+        <button class="btn btn-danger-outline" id="deleteDeviceYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
       </div>
     </div>
   </div>`;
@@ -2728,6 +3019,7 @@ function attachHandlers(){
     stopChatPolling();
     stopApplicationsPolling();
     stopSignupsPolling();
+    stopDevicePolling();
     stopBookingsPolling();
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
     bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
@@ -2941,6 +3233,115 @@ function attachHandlers(){
     };
   }
 
+  if(view==='deviceForm' && !deviceForm.done){
+    const f = deviceForm;
+    const bindText = (id, key) => { const el = $(id); if(el) el.oninput = e => { f[key] = e.target.value; }; };
+    bindText('#df_tutorName','tutorName');
+    bindText('#df_laptopDuration','laptopDuration');
+    bindText('#df_backupPowerDuration','backupPowerDuration');
+    bindText('#df_powerStationSpec','powerStationSpec');
+    bindText('#df_powerStationConnection','powerStationConnection');
+    bindText('#df_laptopExtraDuration','laptopExtraDuration');
+    bindText('#df_outageFrequency','outageFrequency');
+    bindText('#df_lastOutageDate','lastOutageDate');
+    bindText('#df_lastOutageDuration','lastOutageDuration');
+    bindText('#df_outageBackupMethod','outageBackupMethod');
+    bindText('#df_mainInternetProvider','mainInternetProvider');
+    bindText('#df_mainInternetUpload','mainInternetUpload');
+    bindText('#df_mainInternetDownload','mainInternetDownload');
+    bindText('#df_backupInternetProvider','backupInternetProvider');
+    bindText('#df_backupInternetUpload','backupInternetUpload');
+    bindText('#df_backupInternetDownload','backupInternetDownload');
+    bindText('#df_headsetModel','headsetModel');
+    bindText('#df_noiseCancelSoftware','noiseCancelSoftware');
+
+    const bindSelect = (id, key, rerender) => {
+      const el = $(id); if(!el) return;
+      el.onchange = e => { f[key] = e.target.value; if(rerender) render(); };
+    };
+    bindSelect('#df_computerOption','computerOption', false);
+    bindSelect('#df_hasPowerStation','hasPowerStation', true);
+    bindSelect('#df_mainInternetType','mainInternetType', false);
+    bindSelect('#df_backupInternetType','backupInternetType', false);
+
+    $$('[data-df-cb-group]').forEach(el => {
+      el.onchange = e => {
+        const group = el.dataset.dfCbGroup;
+        const val = el.value;
+        const arr = f[group];
+        const idx = arr.indexOf(val);
+        if(el.checked && idx === -1) arr.push(val);
+        if(!el.checked && idx !== -1) arr.splice(idx,1);
+      };
+    });
+
+    const bindFile = (id, fileKey, nameKey) => {
+      const el = $(id);
+      if(el) el.onchange = e => {
+        const file = e.target.files[0];
+        f[fileKey] = file || null;
+        f[nameKey] = file ? file.name : '';
+        render();
+      };
+    };
+    bindFile('#df_powerStationPhoto','powerStationPhotoFile','powerStationPhotoFileName');
+    bindFile('#df_mainInternetSpeedtest','mainInternetSpeedtestFile','mainInternetSpeedtestFileName');
+    bindFile('#df_backupInternetSpeedtest','backupInternetSpeedtestFile','backupInternetSpeedtestFileName');
+
+    const submitBtn = $('#deviceSubmitBtn');
+    if(submitBtn) submitBtn.onclick = async () => {
+      f.error = '';
+      if(!f.tutorName.trim()){
+        f.error = 'Please fill in at least your tutor name.'; render(); return;
+      }
+      f.busy = true; render();
+      try{
+        const deviceId = 'device_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        let powerStationPhotoUrl = '', mainInternetSpeedtestUrl = '', backupInternetSpeedtestUrl = '';
+        if(f.powerStationPhotoFile) powerStationPhotoUrl = await uploadEntityFile(f.powerStationPhotoFile, 'deviceSubmissions', deviceId, 'powerStationPhoto');
+        if(f.mainInternetSpeedtestFile) mainInternetSpeedtestUrl = await uploadEntityFile(f.mainInternetSpeedtestFile, 'deviceSubmissions', deviceId, 'mainInternetSpeedtest');
+        if(f.backupInternetSpeedtestFile) backupInternetSpeedtestUrl = await uploadEntityFile(f.backupInternetSpeedtestFile, 'deviceSubmissions', deviceId, 'backupInternetSpeedtest');
+        const record = {
+          id: deviceId,
+          tutorName: f.tutorName.trim(),
+          computerOption: f.computerOption,
+          laptopDuration: f.laptopDuration.trim(),
+          hasPowerStation: f.hasPowerStation,
+          backupPowerSources: f.backupPowerSources,
+          backupPowerDuration: f.backupPowerDuration.trim(),
+          powerStationSpec: f.powerStationSpec.trim(),
+          powerStationConnection: f.powerStationConnection.trim(),
+          powerStationPhotoUrl,
+          laptopExtraDuration: f.laptopExtraDuration.trim(),
+          outageFrequency: f.outageFrequency.trim(),
+          lastOutageDate: f.lastOutageDate.trim(),
+          lastOutageDuration: f.lastOutageDuration.trim(),
+          outageBackupMethod: f.outageBackupMethod.trim(),
+          mainInternetType: f.mainInternetType,
+          mainInternetProvider: f.mainInternetProvider.trim(),
+          mainInternetSpeedtestUrl,
+          mainInternetUpload: f.mainInternetUpload.trim(),
+          mainInternetDownload: f.mainInternetDownload.trim(),
+          backupInternetType: f.backupInternetType,
+          backupInternetProvider: f.backupInternetProvider.trim(),
+          backupInternetSpeedtestUrl,
+          backupInternetUpload: f.backupInternetUpload.trim(),
+          backupInternetDownload: f.backupInternetDownload.trim(),
+          headsetModel: f.headsetModel.trim(),
+          noiseCancelSoftware: f.noiseCancelSoftware.trim(),
+          submittedAt: new Date().toISOString(),
+          reviewed: false
+        };
+        await saveOneDeviceSubmission(record);
+        f.busy = false; f.done = true; render();
+      }catch(e){
+        console.error('DEVICE SUBMIT ERROR:', e);
+        f.busy = false;
+        f.error = 'Something went wrong submitting this form. Please try again.'; render();
+      }
+    };
+  }
+
   if(view==='gate'){
     if(gateMode==='code'){
       const submit = async () => {
@@ -2951,6 +3352,7 @@ function attachHandlers(){
         if(val === config.adminCode){
           await loadApplications();
           await loadAccountSignups();
+          await loadDeviceSubmissions();
           view='admin'; gateBusy=false; render();
         } else if(val === config.applicantCode){
           view='book'; gateBusy=false; render();
@@ -3163,6 +3565,12 @@ function attachHandlers(){
       stopSignupsPolling();
     }
 
+    if(adminTab==='deviceSubmissions'){
+      startDevicePolling();
+    } else {
+      stopDevicePolling();
+    }
+
     if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats'){
       startBookingsPolling();
     } else {
@@ -3319,6 +3727,36 @@ Langdy Team`;
           const id = deleteAccountSignupTarget;
           await deleteOneAccountSignup(id);
           deleteAccountSignupTarget = null;
+          render();
+        };
+      }
+    }
+
+    if(adminTab==='deviceSubmissions'){
+      $$('[data-view-device]').forEach(el=>{
+        el.onclick = () => { deviceSubmissionDetailTarget = el.dataset.viewDevice; render(); };
+      });
+      $$('[data-delete-device]').forEach(el=>{
+        el.onclick = () => { deleteDeviceSubmissionTarget = el.dataset.deleteDevice; render(); };
+      });
+      if(deviceSubmissionDetailTarget){
+        $('#deviceDetailCloseBtn').onclick = () => { deviceSubmissionDetailTarget=null; render(); };
+        $('#deviceDetailOverlay').onclick = (e) => { if(e.target.id==='deviceDetailOverlay'){ deviceSubmissionDetailTarget=null; render(); } };
+        $('#deviceMarkReviewedBtn').onclick = async () => {
+          const s = deviceSubmissions.find(x=>x.id===deviceSubmissionDetailTarget);
+          if(!s) return;
+          const updated = Object.assign({}, s, { reviewed: !s.reviewed });
+          await saveOneDeviceSubmission(updated);
+          render();
+        };
+      }
+      if(deleteDeviceSubmissionTarget){
+        $('#deleteDeviceNoBtn').onclick = () => { deleteDeviceSubmissionTarget=null; render(); };
+        $('#deleteDeviceOverlay').onclick = (e) => { if(e.target.id==='deleteDeviceOverlay'){ deleteDeviceSubmissionTarget=null; render(); } };
+        $('#deleteDeviceYesBtn').onclick = async () => {
+          const id = deleteDeviceSubmissionTarget;
+          await deleteOneDeviceSubmission(id);
+          deleteDeviceSubmissionTarget = null;
           render();
         };
       }
@@ -3863,6 +4301,7 @@ Langdy Team`;
   const params = new URLSearchParams(window.location.search);
   if(params.has('apply')) view = 'apply';
   else if(params.has('signup')) view = 'signupForm';
+  else if(params.has('device')) view = 'deviceForm';
   await Promise.all([loadConfig(), loadBookings()]);
   render();
 })();
