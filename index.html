@@ -434,7 +434,7 @@ function freshApplyForm(){
 let applyForm = freshApplyForm();
 
 let adminTab = 'calendar';
-let calWeekOffset = 0;
+let calMonthOffset = 0;
 let calShowFirstDemo = true;
 let calShowSecondDemo = true;
 let datesMonthOffset = 0;
@@ -1337,53 +1337,87 @@ function monthMatrix(year, month){
 }
 
 function renderAdminCalendar(){
-  // Monday of the target week (today + calWeekOffset weeks)
-  const today = new Date(); today.setHours(0,0,0,0);
-  const dow = today.getDay(); // 0=Sun..6=Sat
-  const mondayOffset = dow === 0 ? -6 : 1 - dow; // days to subtract to reach this week's Monday
-  const monday = new Date(today);
-  monday.setDate(monday.getDate() + mondayOffset + calWeekOffset*7);
+  const base = new Date();
+  base.setMonth(base.getMonth()+calMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const cells = monthMatrix(year, month);
+  const dowHtml = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
 
-  const days = Array.from({length:7}, (_,i) => {
-    const d = new Date(monday); d.setDate(monday.getDate()+i); return d;
-  });
-
-  const cellsHtml = days.map(dt => {
+  const CHIP_CAP = 3;
+  const cellsHtml = cells.map(d=>{
+    if(d===null) return `<div class="cal-cell empty"></div>`;
+    const dt = new Date(year, month, d);
     const ds = fmtDate(dt);
     const weekend = dt.getDay()===0 || dt.getDay()===6;
     const closed = isDateClosed(ds);
 
     const firstDemoBookings = calShowFirstDemo ? bookings.filter(b=>b.date===ds).sort((a,b)=> a.time.localeCompare(b.time)) : [];
     const secondDemoBookings = calShowSecondDemo ? bookings.filter(b=>b.secondDemoDate===ds).sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||'')) : [];
+    const total = firstDemoBookings.length + secondDemoBookings.length;
 
-    const firstChips = firstDemoBookings.map(b=>
+    const firstChips = firstDemoBookings.slice(0,CHIP_CAP).map(b=>
       `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT">${b.time} ${escapeHtml(b.fullName)}</span>`
     ).join('');
-    const secondChips = secondDemoBookings.map(b=>
+    const secondChips = secondDemoBookings.slice(0, Math.max(0,CHIP_CAP-firstDemoBookings.length)).map(b=>
       `<span class="cal-chip" data-chat-id="${b.id}" style="background:var(--gold-bg); border-color:var(--gold-dark);" title="2nd Demo — ${escapeHtml(b.fullName)} ${b.secondDemoTime||''} KST">🅱 ${b.secondDemoTime||'?'} ${escapeHtml(b.fullName)}</span>`
     ).join('');
+    const shown = Math.min(firstDemoBookings.length, CHIP_CAP) + Math.min(secondDemoBookings.length, Math.max(0,CHIP_CAP-firstDemoBookings.length));
+    const more = total > shown
+      ? `<div class="cal-more" data-day-detail="${ds}" style="font-size:10px; color:var(--navy); font-weight:700; cursor:pointer; margin-top:2px;">+${total-shown} more</div>`
+      : '';
 
-    return `<div class="cal-cell ${weekend?'weekend':''} ${closed?'is-closed':''}" style="min-height:120px;">
-      <div class="dnum"><span>${DOW[dt.getDay()]} ${MONTHS_SHORT[dt.getMonth()]} ${dt.getDate()}</span>${closed?'<span class="closed-tag">Closed</span>':''}</div>
-      ${firstChips}${secondChips}
+    return `<div class="cal-cell ${weekend?'weekend':''} ${closed?'is-closed':''}">
+      <div class="dnum"><span>${d}</span>${closed?'<span class="closed-tag">Closed</span>':''}</div>
+      ${firstChips}${secondChips}${more}
     </div>`;
   }).join('');
-
-  const rangeLabel = `${MONTHS_SHORT[days[0].getMonth()]} ${days[0].getDate()} – ${MONTHS_SHORT[days[6].getMonth()]} ${days[6].getDate()}, ${days[6].getFullYear()}`;
 
   return `
   <div class="card">
     <div class="cal-header">
-      <button class="btn btn-ghost btn-sm" id="calPrev">‹ Prev Week</button>
-      <div class="cal-title">${rangeLabel}</div>
-      <button class="btn btn-ghost btn-sm" id="calNext">Next Week ›</button>
+      <button class="btn btn-ghost btn-sm" id="calPrev">‹ Prev</button>
+      <div class="cal-title">${MONTHS[month]} ${year}</div>
+      <button class="btn btn-ghost btn-sm" id="calNext">Next ›</button>
     </div>
     <div style="display:flex; gap:16px; margin:14px 0;">
       <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="calFilterFirst" ${calShowFirstDemo?'checked':''}> 1st Demo</label>
       <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="calFilterSecond" ${calShowSecondDemo?'checked':''}> 2nd Demo <span style="color:var(--slate-light); font-weight:400;">(KST)</span></label>
     </div>
-    <div class="cal-grid" style="grid-template-columns:repeat(7,1fr);">${cellsHtml}</div>
-    <p style="font-size:12px; color:var(--slate-light); margin-top:14px;">Click a 1st Demo name to reassign or cancel it. Click a 2nd Demo (🅱) name to open the chat.</p>
+    <div class="cal-grid">${dowHtml}${cellsHtml}</div>
+    <p style="font-size:12px; color:var(--slate-light); margin-top:14px;">Click a 1st Demo name to reassign or cancel it. Click a 2nd Demo (🅱) name to open the chat. Click "+N more" to see everyone booked that day.</p>
+  </div>
+  ${dayDetailTarget ? renderDayDetailModal() : ''}`;
+}
+
+let dayDetailTarget = null; // date string ('YYYY-MM-DD') whose full-day popup is open
+
+function renderDayDetailModal(){
+  const ds = dayDetailTarget;
+  const [y,m,d] = ds.split('-').map(Number);
+  const dt = new Date(y, m-1, d);
+  const firstDemoBookings = bookings.filter(b=>b.date===ds).sort((a,b)=> a.time.localeCompare(b.time));
+  const secondDemoBookings = bookings.filter(b=>b.secondDemoDate===ds).sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||''));
+  const firstRows = firstDemoBookings.map(b => `
+    <div class="ticket-row" style="cursor:pointer;" data-edit-id="${b.id}">
+      <span class="k">${b.time} PHT</span><span class="v">${escapeHtml(b.fullName)}</span>
+    </div>`).join('') || `<p style="font-size:12.5px; color:var(--slate-light); margin:6px 0;">No 1st Demo bookings.</p>`;
+  const secondRows = secondDemoBookings.map(b => `
+    <div class="ticket-row" style="cursor:pointer;" data-chat-id="${b.id}">
+      <span class="k">${b.secondDemoTime||'?'} KST</span><span class="v">${escapeHtml(b.fullName)}</span>
+    </div>`).join('') || `<p style="font-size:12.5px; color:var(--slate-light); margin:6px 0;">No 2nd Demo bookings.</p>`;
+  return `
+  <div class="modal-overlay" id="dayDetailOverlay">
+    <div class="modal" style="max-width:480px; max-height:78vh; overflow:auto;">
+      <h3>${fmtDateLabel(ds)}</h3>
+      <div class="section-title" style="font-size:13.5px; margin-top:10px;">1st Demo (PHT)</div>
+      ${firstRows}
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:13.5px;">2nd Demo (KST)</div>
+      ${secondRows}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="dayDetailCloseBtn">Close</button>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -2335,8 +2369,8 @@ Langdy Team`;
     }
 
     if(adminTab==='calendar'){
-      $('#calPrev').onclick = () => { calWeekOffset--; render(); };
-      $('#calNext').onclick = () => { calWeekOffset++; render(); };
+      $('#calPrev').onclick = () => { calMonthOffset--; render(); };
+      $('#calNext').onclick = () => { calMonthOffset++; render(); };
       const filterFirst = $('#calFilterFirst');
       if(filterFirst) filterFirst.onchange = () => { calShowFirstDemo = filterFirst.checked; render(); };
       const filterSecond = $('#calFilterSecond');
@@ -2346,6 +2380,7 @@ Langdy Team`;
           const id = el.dataset.editId;
           editingBooking = bookings.find(b=>b.id===id);
           editDate = editingBooking.date; editTime = editingBooking.time; editError='';
+          dayDetailTarget = null;
           render();
         };
       });
@@ -2354,11 +2389,21 @@ Langdy Team`;
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
           chatDraftText = '';
+          dayDetailTarget = null;
           render();
           await markChatReadByAdmin(id);
           render();
         };
       });
+      $$('[data-day-detail]').forEach(el=>{
+        el.onclick = () => { dayDetailTarget = el.dataset.dayDetail; render(); };
+      });
+      if(dayDetailTarget){
+        const closeBtn = $('#dayDetailCloseBtn');
+        if(closeBtn) closeBtn.onclick = () => { dayDetailTarget = null; render(); };
+        const overlay = $('#dayDetailOverlay');
+        if(overlay) overlay.onclick = (e) => { if(e.target.id==='dayDetailOverlay'){ dayDetailTarget=null; render(); } };
+      }
     }
 
     if(adminTab==='list'){
