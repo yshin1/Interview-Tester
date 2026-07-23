@@ -348,6 +348,8 @@ const REGULATION_TEST_OPTIONS = ['예정','안내 완료','확인 완료'];
 const TRAINING_SESSION_OPTIONS = ['Not started','In progress','Sent','Done','No show'];
 const SCHEDULING_STATUS_OPTIONS = ['예정','대기','완료'];
 const DEVICE_FORM_OPTIONS = ['발송 완료','제출 완료'];
+const DEVICE_BACKUP_POWER_OPTIONS = ['미보유','6 hrs 이하','여분 노트북 보유','보유'];
+const DEVICE_BACKUP_INTERNET_OPTIONS = ['미보유','25 mbps 이하','보유'];
 
 // Fixed left-hand labels for the "Applicant Checklist" table — matches the
 // Notion template exactly. The right-hand value per row is free text.
@@ -2133,6 +2135,26 @@ function renderSignupStatusModal(){
           ${DEVICE_FORM_OPTIONS.map(s=>`<option value="${s}" ${b.deviceFormStatus===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:14px;">Device</div>
+      <div class="field">
+        <label>백업 파워</label>
+        <select id="deviceBackupPowerSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.deviceBackupPower?'selected':''}>—</option>
+          ${DEVICE_BACKUP_POWER_OPTIONS.map(s=>`<option value="${s}" ${b.deviceBackupPower===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>백업 인터넷</label>
+        <select id="deviceBackupInternetSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.deviceBackupInternet?'selected':''}>—</option>
+          ${DEVICE_BACKUP_INTERNET_OPTIONS.map(s=>`<option value="${s}" ${b.deviceBackupInternet===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Note</label>
+        <textarea id="deviceNoteTextarea" style="width:100%; min-height:80px; font-size:13px; line-height:1.5;">${escapeHtml(b.deviceNote||'')}</textarea>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="signupStatusCloseBtn">Close</button>
       </div>
@@ -2605,7 +2627,10 @@ function attachHandlers(){
               schedulingDate: '',
               schedulingTime: '',
               schedulingStatus: '',
-              deviceFormStatus: ''
+              deviceFormStatus: '',
+              deviceBackupPower: '',
+              deviceBackupInternet: '',
+              deviceNote: ''
             };
             await saveBookings([...bookings, newBooking]);
             // Verify the write actually stuck — the shared storage is "last write wins",
@@ -3167,6 +3192,12 @@ Langdy Team`;
         if(schedStatusSel) schedStatusSel.onchange = () => saveChecklistField({ schedulingStatus: schedStatusSel.value });
         const deviceFormSel = $('#deviceFormSelect');
         if(deviceFormSel) deviceFormSel.onchange = () => saveChecklistField({ deviceFormStatus: deviceFormSel.value });
+        const backupPowerSel = $('#deviceBackupPowerSelect');
+        if(backupPowerSel) backupPowerSel.onchange = () => saveChecklistField({ deviceBackupPower: backupPowerSel.value });
+        const backupInternetSel = $('#deviceBackupInternetSelect');
+        if(backupInternetSel) backupInternetSel.onchange = () => saveChecklistField({ deviceBackupInternet: backupInternetSel.value });
+        const deviceNoteEl = $('#deviceNoteTextarea');
+        if(deviceNoteEl) deviceNoteEl.onchange = () => saveChecklistField({ deviceNote: deviceNoteEl.value });
       }
     }
 
