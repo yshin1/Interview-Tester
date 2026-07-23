@@ -343,7 +343,9 @@ const WEEKEND_BLOCKS = (() => {
 const BACKUP_POWER_OPTIONS = ['Gasoline generator','Building generator','Car battery','Back-up UPS','Powerbank/Powerstation (30,000 mAh or above)','None'];
 const ASSIGNEE_OPTIONS = ['Lyn','Sabrina','Soo','Julia','Elena'];
 const ONBOARDING_STATUS_OPTIONS = ['계정 생성','OT','Scheduling','NTT'];
-const SIGNUP_STATUS_OPTIONS = ['예정','제출 완료','가입 완료'];
+const SIGNUP_STATUS_OPTIONS = ['예정','안내 완료','가입 완료'];
+const REGULATION_TEST_OPTIONS = ['예정','안내 완료','확인 완료'];
+const TRAINING_SESSION_OPTIONS = ['Not started','In progress','Sent','Done','No show'];
 
 // Shared result options for both 1st and 2nd Demo result dropdowns.
 const DEMO_RESULT_OPTIONS = [
@@ -1856,13 +1858,27 @@ function renderSignupStatusModal(){
   return `
   <div class="modal-overlay" id="signupStatusOverlay">
     <div class="modal" style="max-width:380px;">
-      <h3>Signup Status — ${escapeHtml(b.fullName)}</h3>
-      <p class="section-desc" style="margin-bottom:10px;">Track where this person is in the Langdy tutor account signup process.</p>
+      <h3>Status — ${escapeHtml(b.fullName)}</h3>
+      <p class="section-desc" style="margin-bottom:10px;">Track this person's onboarding checklist.</p>
       <div class="field">
-        <label>Status</label>
+        <label>Signup Status</label>
         <select id="signupStatusSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
           <option value="" ${!b.signupStatus?'selected':''}>—</option>
           ${SIGNUP_STATUS_OPTIONS.map(s=>`<option value="${s}" ${b.signupStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>규정 테스트</label>
+        <select id="regulationTestSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.regulationTestStatus?'selected':''}>—</option>
+          ${REGULATION_TEST_OPTIONS.map(s=>`<option value="${s}" ${b.regulationTestStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Training Session</label>
+        <select id="trainingSessionSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.trainingSessionStatus?'selected':''}>—</option>
+          ${TRAINING_SESSION_OPTIONS.map(s=>`<option value="${s}" ${b.trainingSessionStatus===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <div class="modal-actions">
@@ -1910,7 +1926,7 @@ function renderAdminOnboarding(){
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unreadCountForAdmin(b)>0?`<span class="unread-badge">${unreadCountForAdmin(b)}</span>`:''}</button>
           <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
-          <button class="btn btn-ghost btn-sm" data-signup-status-id="${b.id}">🪪 Signup${b.signupStatus?': '+escapeHtml(b.signupStatus):''}</button>
+          <button class="btn btn-ghost btn-sm" data-signup-status-id="${b.id}">📋 Status</button>
         </div>
       </td>
     </tr>`).join('');
@@ -2329,7 +2345,9 @@ function attachHandlers(){
               onboardingStatus: '',
               onboardingDate: '',
               onboardingTime: '',
-              signupStatus: ''
+              signupStatus: '',
+              regulationTestStatus: '',
+              trainingSessionStatus: ''
             };
             await saveBookings([...bookings, newBooking]);
             // Verify the write actually stuck — the shared storage is "last write wins",
@@ -2857,16 +2875,21 @@ Langdy Team`;
       if(signupStatusTarget){
         $('#signupStatusCloseBtn').onclick = () => { signupStatusTarget=null; render(); };
         $('#signupStatusOverlay').onclick = (e) => { if(e.target.id==='signupStatusOverlay'){ signupStatusTarget=null; render(); } };
-        const selectEl = $('#signupStatusSelect');
-        if(selectEl) selectEl.onchange = async () => {
+        const saveChecklistField = async (patch) => {
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===signupStatusTarget);
           if(idx===-1) return;
-          const updated = Object.assign({}, bookings[idx], { signupStatus: selectEl.value });
+          const updated = Object.assign({}, bookings[idx], patch);
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           render();
         };
+        const signupSel = $('#signupStatusSelect');
+        if(signupSel) signupSel.onchange = () => saveChecklistField({ signupStatus: signupSel.value });
+        const regSel = $('#regulationTestSelect');
+        if(regSel) regSel.onchange = () => saveChecklistField({ regulationTestStatus: regSel.value });
+        const trainingSel = $('#trainingSessionSelect');
+        if(trainingSel) trainingSel.onchange = () => saveChecklistField({ trainingSessionStatus: trainingSel.value });
       }
     }
 
