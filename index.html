@@ -349,6 +349,75 @@ const TRAINING_SESSION_OPTIONS = ['Not started','In progress','Sent','Done','No 
 const SCHEDULING_STATUS_OPTIONS = ['예정','대기','완료'];
 const DEVICE_FORM_OPTIONS = ['발송 완료','제출 완료'];
 
+// Fixed left-hand labels for the "Applicant Checklist" table — matches the
+// Notion template exactly. The right-hand value per row is free text.
+const APPLICANT_CHECKLIST_LABELS = [
+  'New or Former Tutor',
+  'Certificate',
+  'Backup Battery',
+  'Backup Internet',
+  'Additional: Using CHROME during the demo',
+  'Informing Peak Hours (Please ask their availability for peak hours)',
+  'Availability of Minimum Plotting Hours a Week',
+  'Payment Agreement'
+];
+
+// Fixed Page/Checklist columns for the "Guideline" table — matches the
+// Notion template exactly. The ✅/❌ columns per row are freely toggleable.
+const GUIDELINE_CHECKLIST = [
+  {page:2, text:'Guess the native exp'},
+  {page:3, text:'Typed the expression'},
+  {page:3, text:'Watched the video?'},
+  {page:3, text:'Summary of the video'},
+  {page:3, text:'Asked main question'},
+  {page:3, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:3, text:'Asked follow-up questions'},
+  {page:3, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:3, text:'Provided verbal feedback before moving on to the next part'},
+  {page:4, text:'Reminded of the expression 1ST ACTIVITY'},
+  {page:4, text:'Provided brief verbal feedback for each practice sentence'},
+  {page:4, text:'Asked the middle question?'},
+  {page:4, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:4, text:'Asked follow-up questions'},
+  {page:4, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:4, text:'Provided verbal feedback before moving on to the next part'},
+  {page:4, text:'Reminded of the expression 2ND ACTIVITY'},
+  {page:4, text:'Introduced Blur Button'},
+  {page:5, text:'Purple button?'},
+  {page:5, text:'Reminder of Expression'},
+  {page:5, text:'Encourage to use the Expression'},
+  {page:5, text:'Asked question #1'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Asked follow-up questions'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Provided verbal feedback before moving on to the question #2'},
+  {page:5, text:'Asked question #2'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Asked follow-up questions'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Provided verbal feedback before moving on to the question #3'},
+  {page:5, text:'Asked question #3'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Asked follow-up questions'},
+  {page:5, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:5, text:'Provided verbal feedback before moving on to the next page'},
+  {page:6, text:'Asked question #1'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Asked follow-up questions'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Provided verbal feedback before moving on to the question #2'},
+  {page:6, text:'Asked question #2'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Asked follow-up questions'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Provided verbal feedback before moving on to the question #3'},
+  {page:6, text:'Asked question #3'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Asked follow-up questions'},
+  {page:6, text:'While having a conversation, typed error sentences first and then provided correct sentences'},
+  {page:6, text:'Provided verbal feedback before wrapping up the page'}
+];
+
 // Shared result options for both 1st and 2nd Demo result dropdowns.
 const DEMO_RESULT_OPTIONS = [
   {value:'', label:'Pending'},
@@ -1739,14 +1808,93 @@ function renderAdminList(){
   ${notesTarget ? renderNotesModal() : ''}`;
 }
 
+// Reads the Notes modal's current DOM state (feedback text, checklist
+// answers, guideline checkboxes) into a single patch object to save.
+function gatherNotesFormData(){
+  const textarea = document.getElementById('notesTextarea');
+  const notes = textarea ? textarea.value : '';
+  const checklistAnswers = {};
+  document.querySelectorAll('[data-checklist-idx]').forEach(el => {
+    checklistAnswers[el.dataset.checklistIdx] = el.value;
+  });
+  const guidelineAnswers = {};
+  document.querySelectorAll('[data-guideline-check]').forEach(el => {
+    if(el.checked) guidelineAnswers[el.dataset.guidelineCheck] = el.dataset.guidelineMark;
+  });
+  return { notes, checklistAnswers, guidelineAnswers };
+}
+// Wires up the ✅/❌ checkbox pair for each guideline row so checking one
+// unchecks the other — done via direct DOM manipulation (no render()) so it
+// doesn't disturb anything else the person has typed but not saved yet.
+function wireGuidelineCheckboxExclusivity(){
+  document.querySelectorAll('[data-guideline-check]').forEach(el => {
+    el.onchange = () => {
+      if(!el.checked) return;
+      const row = el.dataset.guidelineCheck;
+      document.querySelectorAll(`[data-guideline-check="${row}"]`).forEach(sibling => {
+        if(sibling !== el) sibling.checked = false;
+      });
+    };
+  });
+}
+
 function renderNotesModal(){
   const b = bookings.find(x => x.id === notesTarget) || {};
+  const checklistAnswers = b.checklistAnswers || {};
+  const guidelineAnswers = b.guidelineAnswers || {};
+
+  const checklistRows = APPLICANT_CHECKLIST_LABELS.map((label, i) => `
+    <tr>
+      <td style="font-size:12.5px; padding:6px 8px; border:1px solid var(--line); font-weight:600;">${escapeHtml(label)}</td>
+      <td style="padding:4px; border:1px solid var(--line);">
+        <input type="text" data-checklist-idx="${i}" value="${escapeHtml(checklistAnswers[i]||'')}" style="width:100%; border:none; padding:6px 8px; font-size:12.5px; font-family:inherit;">
+      </td>
+    </tr>`).join('');
+
+  const guidelineRows = GUIDELINE_CHECKLIST.map((item, i) => {
+    const val = guidelineAnswers[i] || '';
+    return `
+    <tr>
+      <td style="font-size:12px; padding:5px 7px; border:1px solid var(--line); text-align:center; color:var(--slate-light);">${item.page}</td>
+      <td style="font-size:12px; padding:5px 7px; border:1px solid var(--line);">${escapeHtml(item.text)}</td>
+      <td style="padding:5px 7px; border:1px solid var(--line); text-align:center;">
+        <input type="checkbox" data-guideline-check="${i}" data-guideline-mark="✅" ${val==='✅'?'checked':''} style="width:16px; height:16px; accent-color:var(--success);">
+      </td>
+      <td style="padding:5px 7px; border:1px solid var(--line); text-align:center;">
+        <input type="checkbox" data-guideline-check="${i}" data-guideline-mark="❌" ${val==='❌'?'checked':''} style="width:16px; height:16px; accent-color:var(--danger);">
+      </td>
+    </tr>`;
+  }).join('');
+
   return `
   <div class="modal-overlay" id="notesModalOverlay">
-    <div class="modal" style="max-width:640px;">
+    <div class="modal" id="notesModalBody" style="max-width:720px; max-height:84vh; overflow:auto;">
       <h3>Notes — ${escapeHtml(b.fullName)} (${fmtDateLabel(b.date)} ${b.time})</h3>
-      <p class="section-desc" style="margin-bottom:10px;">Write your 1st Demo review here — overall review, feedback, checklist, whatever format you like. This replaces having to open a separate Notion page per applicant.</p>
-      <textarea id="notesTextarea" style="width:100%; min-height:360px; font-size:13px; line-height:1.6;">${escapeHtml(b.notes||'')}</textarea>
+
+      <div class="section-title" style="font-size:14px; margin-top:6px;">Feedback</div>
+      <p class="section-desc" style="margin-bottom:8px;">Overall review, reaction, connection, pronunciation, feedback for the applicant — whatever format you like.</p>
+      <textarea id="notesTextarea" style="width:100%; min-height:220px; font-size:13px; line-height:1.6;">${escapeHtml(b.notes||'')}</textarea>
+
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:14px;">⭐ Applicant Checklist</div>
+      <table style="width:100%; border-collapse:collapse; margin:10px 0;">
+        <tbody>${checklistRows}</tbody>
+      </table>
+
+      <div class="divider"></div>
+      <div class="section-title" style="font-size:14px;">⭐ Guideline</div>
+      <table style="width:100%; border-collapse:collapse; margin:10px 0;">
+        <thead>
+          <tr>
+            <th style="font-size:11.5px; padding:6px; border:1px solid var(--line); background:#FAFBFC;">Page</th>
+            <th style="font-size:11.5px; padding:6px; border:1px solid var(--line); background:#FAFBFC;">Checklist</th>
+            <th style="font-size:11.5px; padding:6px; border:1px solid var(--line); background:#FAFBFC;">✅</th>
+            <th style="font-size:11.5px; padding:6px; border:1px solid var(--line); background:#FAFBFC;">❌</th>
+          </tr>
+        </thead>
+        <tbody>${guidelineRows}</tbody>
+      </table>
+
       <div class="modal-actions">
         <button class="btn btn-ghost" id="notesCloseBtn">Close</button>
         <button class="btn btn-primary" id="notesSaveBtn">Save Notes</button>
@@ -2723,14 +2871,15 @@ Langdy Team`;
         el.onclick = () => { notesTarget = el.dataset.notesId; render(); };
       });
       if(notesTarget){
+        wireGuidelineCheckboxExclusivity();
         $('#notesCloseBtn').onclick = () => { notesTarget=null; render(); };
         $('#notesModalOverlay').onclick = (e) => { if(e.target.id==='notesModalOverlay'){ notesTarget=null; render(); } };
         $('#notesSaveBtn').onclick = async () => {
-          const text = document.getElementById('notesTextarea').value;
+          const formData = gatherNotesFormData();
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===notesTarget);
           if(idx===-1) return;
-          const updated = Object.assign({}, bookings[idx], { notes: text });
+          const updated = Object.assign({}, bookings[idx], formData);
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           notesTarget = null;
@@ -2829,14 +2978,15 @@ Langdy Team`;
         el.onclick = () => { notesTarget = el.dataset.notesId; render(); };
       });
       if(notesTarget){
+        wireGuidelineCheckboxExclusivity();
         $('#notesCloseBtn').onclick = () => { notesTarget=null; render(); };
         $('#notesModalOverlay').onclick = (e) => { if(e.target.id==='notesModalOverlay'){ notesTarget=null; render(); } };
         $('#notesSaveBtn').onclick = async () => {
-          const text = document.getElementById('notesTextarea').value;
+          const formData = gatherNotesFormData();
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===notesTarget);
           if(idx===-1) return;
-          const updated = Object.assign({}, bookings[idx], { notes: text });
+          const updated = Object.assign({}, bookings[idx], formData);
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           notesTarget = null;
@@ -2922,14 +3072,15 @@ Langdy Team`;
         el.onclick = () => { notesTarget = el.dataset.notesId; render(); };
       });
       if(notesTarget){
+        wireGuidelineCheckboxExclusivity();
         $('#notesCloseBtn').onclick = () => { notesTarget=null; render(); };
         $('#notesModalOverlay').onclick = (e) => { if(e.target.id==='notesModalOverlay'){ notesTarget=null; render(); } };
         $('#notesSaveBtn').onclick = async () => {
-          const text = document.getElementById('notesTextarea').value;
+          const formData = gatherNotesFormData();
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===notesTarget);
           if(idx===-1) return;
-          const updated = Object.assign({}, bookings[idx], { notes: text });
+          const updated = Object.assign({}, bookings[idx], formData);
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           notesTarget = null;
