@@ -1322,6 +1322,7 @@ function renderAdmin(){
     ${editingBooking ? renderEditModal() : ''}
     ${cancelTarget ? renderCancelModal() : ''}
     ${chatTarget ? renderAdminChatModal() : ''}
+    ${editingSecondDemo ? renderEditSecondDemoModal() : ''}
   </div>`;
 }
 
@@ -1352,14 +1353,14 @@ function renderAdminCalendar(){
     const closed = isDateClosed(ds);
 
     const firstDemoBookings = calShowFirstDemo ? bookings.filter(b=>b.date===ds).sort((a,b)=> a.time.localeCompare(b.time)) : [];
-    const secondDemoBookings = calShowSecondDemo ? bookings.filter(b=>b.secondDemoDate===ds).sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||'')) : [];
+    const secondDemoBookings = calShowSecondDemo ? bookings.filter(b=>b.secondDemoDate===ds && b.demoResult==='pass').sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||'')) : [];
     const total = firstDemoBookings.length + secondDemoBookings.length;
 
     const firstChips = firstDemoBookings.slice(0,CHIP_CAP).map(b=>
       `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT">${b.time} ${escapeHtml(b.fullName)}</span>`
     ).join('');
     const secondChips = secondDemoBookings.slice(0, Math.max(0,CHIP_CAP-firstDemoBookings.length)).map(b=>
-      `<span class="cal-chip" data-chat-id="${b.id}" style="background:var(--gold-bg); border-color:var(--gold-dark);" title="2nd Demo — ${escapeHtml(b.fullName)} ${b.secondDemoTime||''} KST">🅱 ${b.secondDemoTime||'?'} ${escapeHtml(b.fullName)}</span>`
+      `<span class="cal-chip" data-2nd-schedule-id="${b.id}" style="background:var(--gold-bg); border-color:var(--gold-dark);" title="2nd Demo — ${escapeHtml(b.fullName)} ${b.secondDemoTime||''} KST">🅱 ${b.secondDemoTime||'?'} ${escapeHtml(b.fullName)}</span>`
     ).join('');
     const shown = Math.min(firstDemoBookings.length, CHIP_CAP) + Math.min(secondDemoBookings.length, Math.max(0,CHIP_CAP-firstDemoBookings.length));
     const more = total > shown
@@ -1390,19 +1391,65 @@ function renderAdminCalendar(){
 }
 
 let dayDetailTarget = null; // date string ('YYYY-MM-DD') whose full-day popup is open
+let editingSecondDemo = null; // booking whose 2nd Demo schedule modal is open
+
+function renderEditSecondDemoModal(){
+  const b = bookings.find(x => x.id === editingSecondDemo.id) || editingSecondDemo;
+  const [curH, curM] = (b.secondDemoTime||'').split(':');
+  const hourOptions = Array.from({length:24}, (_,h) => String(h).padStart(2,'0'))
+    .map(h => `<option value="${h}" ${curH===h?'selected':''}>${h}</option>`).join('');
+  const minuteOptions = ['00','15','30','45']
+    .map(m => `<option value="${m}" ${curM===m?'selected':''}>${m}</option>`).join('');
+  return `
+  <div class="modal-overlay" id="esdOverlay">
+    <div class="modal" style="max-width:440px;">
+      <h3>2nd Demo Schedule — ${escapeHtml(b.fullName)}</h3>
+      <div class="field">
+        <label>Assigned to</label>
+        <select id="esdAssign" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.secondDemoAssignedTo?'selected':''}>—</option>
+          ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.secondDemoAssignedTo===n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="esdDate" value="${b.secondDemoDate||''}" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit; cursor:pointer;">
+      </div>
+      <div class="field">
+        <label>Time (KST)</label>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <select id="esdHour" style="flex:1; padding:11px 8px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;"><option value="">--</option>${hourOptions}</select>
+          <span>:</span>
+          <select id="esdMinute" style="flex:1; padding:11px 8px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;"><option value="">--</option>${minuteOptions}</select>
+        </div>
+      </div>
+      <div class="field">
+        <label>2nd Demo Result</label>
+        <select id="esdResult" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          ${DEMO_RESULT_OPTIONS.map(o=>`<option value="${o.value}" ${(b.secondDemoResult||'')===o.value?'selected':''}>${o.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="esdCloseBtn">Close</button>
+        <button class="btn btn-primary" id="esdChatBtn">💬 Open Chat</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 
 function renderDayDetailModal(){
   const ds = dayDetailTarget;
   const [y,m,d] = ds.split('-').map(Number);
   const dt = new Date(y, m-1, d);
   const firstDemoBookings = bookings.filter(b=>b.date===ds).sort((a,b)=> a.time.localeCompare(b.time));
-  const secondDemoBookings = bookings.filter(b=>b.secondDemoDate===ds).sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||''));
+  const secondDemoBookings = bookings.filter(b=>b.secondDemoDate===ds && b.demoResult==='pass').sort((a,b)=> (a.secondDemoTime||'').localeCompare(b.secondDemoTime||''));
   const firstRows = firstDemoBookings.map(b => `
     <div class="ticket-row" style="cursor:pointer;" data-edit-id="${b.id}">
       <span class="k">${b.time} PHT</span><span class="v">${escapeHtml(b.fullName)}</span>
     </div>`).join('') || `<p style="font-size:12.5px; color:var(--slate-light); margin:6px 0;">No 1st Demo bookings.</p>`;
   const secondRows = secondDemoBookings.map(b => `
-    <div class="ticket-row" style="cursor:pointer;" data-chat-id="${b.id}">
+    <div class="ticket-row" style="cursor:pointer;" data-2nd-schedule-id="${b.id}">
       <span class="k">${b.secondDemoTime||'?'} KST</span><span class="v">${escapeHtml(b.fullName)}</span>
     </div>`).join('') || `<p style="font-size:12.5px; color:var(--slate-light); margin:6px 0;">No 2nd Demo bookings.</p>`;
   return `
@@ -2384,14 +2431,11 @@ Langdy Team`;
           render();
         };
       });
-      $$('[data-chat-id]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.chatId;
-          chatTarget = bookings.find(b=>b.id===id);
-          chatDraftText = '';
+      $$('[data-2nd-schedule-id]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset['2ndScheduleId'];
+          editingSecondDemo = bookings.find(b=>b.id===id);
           dayDetailTarget = null;
-          render();
-          await markChatReadByAdmin(id);
           render();
         };
       });
@@ -2739,6 +2783,62 @@ Langdy Team`;
       // Only stop polling here if nothing else on the admin side needs it —
       // the applicant chat view manages its own start/stop independently.
       if(chatPollBookingId && adminTab==='list') stopChatPolling();
+    }
+
+    if(editingSecondDemo){
+      const saveField = async (patch) => {
+        await loadBookings();
+        const idx = bookings.findIndex(x=>x.id===editingSecondDemo.id);
+        if(idx===-1) return;
+        const updated = Object.assign({}, bookings[idx], patch);
+        const next = [...bookings]; next[idx] = updated;
+        await saveBookings(next);
+        editingSecondDemo = updated;
+        render();
+      };
+      const assignSel = $('#esdAssign');
+      if(assignSel) assignSel.onchange = () => saveField({ secondDemoAssignedTo: assignSel.value });
+      const dateInput = $('#esdDate');
+      if(dateInput){
+        dateInput.onclick = () => { try{ dateInput.showPicker(); }catch(e){} };
+        dateInput.onchange = () => saveField({ secondDemoDate: dateInput.value });
+      }
+      const resultSel = $('#esdResult');
+      if(resultSel) resultSel.onchange = () => saveField({ secondDemoResult: resultSel.value });
+      const updateTime = () => {
+        const h = document.getElementById('esdHour').value;
+        const m = document.getElementById('esdMinute').value;
+        const combined = (h && m) ? `${h}:${m}` : '';
+        if(combined) saveField({ secondDemoTime: combined });
+        else{
+          // Partial selection (only hour or only minute chosen) — save silently
+          // without re-rendering, same reasoning as the 2nd Demo tab's version:
+          // re-rendering now would reset both dropdowns back to blank before
+          // the person finishes picking both.
+          loadBookings().then(async () => {
+            const idx = bookings.findIndex(x=>x.id===editingSecondDemo.id);
+            if(idx===-1) return;
+            const updated = Object.assign({}, bookings[idx], { secondDemoTime: combined });
+            const next = [...bookings]; next[idx] = updated;
+            await saveBookings(next);
+          });
+        }
+      };
+      const hourSel = $('#esdHour');
+      if(hourSel) hourSel.onchange = updateTime;
+      const minuteSel = $('#esdMinute');
+      if(minuteSel) minuteSel.onchange = updateTime;
+      $('#esdCloseBtn').onclick = () => { editingSecondDemo = null; render(); };
+      $('#esdOverlay').onclick = (e) => { if(e.target.id==='esdOverlay'){ editingSecondDemo=null; render(); } };
+      $('#esdChatBtn').onclick = async () => {
+        const id = editingSecondDemo.id;
+        editingSecondDemo = null;
+        chatTarget = bookings.find(b=>b.id===id);
+        chatDraftText = '';
+        render();
+        await markChatReadByAdmin(id);
+        render();
+      };
     }
   }
 }
