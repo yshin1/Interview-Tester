@@ -1859,7 +1859,7 @@ function renderSignupStatusModal(){
   if(!b) return '';
   return `
   <div class="modal-overlay" id="signupStatusOverlay">
-    <div class="modal" style="max-width:400px; max-height:80vh; overflow:auto;">
+    <div class="modal" id="signupStatusModalBody" style="max-width:400px; max-height:80vh; overflow:auto;">
       <h3>Status — ${escapeHtml(b.fullName)}</h3>
       <p class="section-desc" style="margin-bottom:10px;">Track this person's onboarding checklist.</p>
       <div class="field">
@@ -1895,7 +1895,16 @@ function renderSignupStatusModal(){
           const placeholder = b.trainingSessionDate ? '' : `<option value="">Select a date…</option>`;
           return `<select id="trainingSessionDateSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
         })()}
-        <p class="hint" style="margin-top:6px;">Time is always fixed at <strong>13:00 PHT</strong>.</p>
+      </div>
+      <div class="field">
+        <label>Training Session Time (PHT)</label>
+        ${(() => {
+          // Defaults to 13:00 since that's the usual time — occasional
+          // exceptions can just pick a different one from the dropdown.
+          const currentTime = b.trainingSessionTime || '13:00';
+          const options = TIME_15MIN_OPTIONS.map(t=>`<option value="${t}" ${currentTime===t?'selected':''}>${t}</option>`).join('');
+          return `<select id="trainingSessionTimeSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${options}</select>`;
+        })()}
       </div>
       <div class="divider"></div>
       <div class="field">
@@ -2401,6 +2410,7 @@ function attachHandlers(){
               regulationTestStatus: '',
               trainingSessionStatus: '',
               trainingSessionDate: '',
+              trainingSessionTime: '13:00',
               schedulingDate: '',
               schedulingTime: '',
               schedulingStatus: '',
@@ -2933,6 +2943,8 @@ Langdy Team`;
         $('#signupStatusCloseBtn').onclick = () => { signupStatusTarget=null; render(); };
         $('#signupStatusOverlay').onclick = (e) => { if(e.target.id==='signupStatusOverlay'){ signupStatusTarget=null; render(); } };
         const saveChecklistField = async (patch) => {
+          const modalBody = document.getElementById('signupStatusModalBody');
+          const prevScrollTop = modalBody ? modalBody.scrollTop : 0;
           await loadBookings();
           const idx = bookings.findIndex(x=>x.id===signupStatusTarget);
           if(idx===-1) return;
@@ -2940,6 +2952,8 @@ Langdy Team`;
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           render();
+          const modalBodyAfter = document.getElementById('signupStatusModalBody');
+          if(modalBodyAfter) modalBodyAfter.scrollTop = prevScrollTop;
         };
         const signupSel = $('#signupStatusSelect');
         if(signupSel) signupSel.onchange = () => saveChecklistField({ signupStatus: signupSel.value });
@@ -2949,6 +2963,8 @@ Langdy Team`;
         if(trainingSel) trainingSel.onchange = () => saveChecklistField({ trainingSessionStatus: trainingSel.value });
         const trainingDateSel = $('#trainingSessionDateSelect');
         if(trainingDateSel) trainingDateSel.onchange = () => saveChecklistField({ trainingSessionDate: trainingDateSel.value });
+        const trainingTimeSel = $('#trainingSessionTimeSelect');
+        if(trainingTimeSel) trainingTimeSel.onchange = () => saveChecklistField({ trainingSessionTime: trainingTimeSel.value });
         const schedDateSel = $('#schedulingDateSelect');
         if(schedDateSel) schedDateSel.onchange = () => saveChecklistField({ schedulingDate: schedDateSel.value });
         const schedTimeSel = $('#schedulingTimeSelect');
