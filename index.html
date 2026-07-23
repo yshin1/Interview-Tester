@@ -346,6 +346,8 @@ const ONBOARDING_STATUS_OPTIONS = ['계정 생성','OT','Scheduling','NTT'];
 const SIGNUP_STATUS_OPTIONS = ['예정','안내 완료','가입 완료'];
 const REGULATION_TEST_OPTIONS = ['예정','안내 완료','확인 완료'];
 const TRAINING_SESSION_OPTIONS = ['Not started','In progress','Sent','Done','No show'];
+const SCHEDULING_STATUS_OPTIONS = ['예정','대기','완료'];
+const DEVICE_FORM_OPTIONS = ['발송 완료','제출 완료'];
 
 // Shared result options for both 1st and 2nd Demo result dropdowns.
 const DEMO_RESULT_OPTIONS = [
@@ -1857,7 +1859,7 @@ function renderSignupStatusModal(){
   if(!b) return '';
   return `
   <div class="modal-overlay" id="signupStatusOverlay">
-    <div class="modal" style="max-width:380px;">
+    <div class="modal" style="max-width:400px; max-height:80vh; overflow:auto;">
       <h3>Status — ${escapeHtml(b.fullName)}</h3>
       <p class="section-desc" style="margin-bottom:10px;">Track this person's onboarding checklist.</p>
       <div class="field">
@@ -1874,11 +1876,61 @@ function renderSignupStatusModal(){
           ${REGULATION_TEST_OPTIONS.map(s=>`<option value="${s}" ${b.regulationTestStatus===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
+      <div class="divider"></div>
       <div class="field">
         <label>Training Session</label>
         <select id="trainingSessionSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
           <option value="" ${!b.trainingSessionStatus?'selected':''}>—</option>
           ${TRAINING_SESSION_OPTIONS.map(s=>`<option value="${s}" ${b.trainingSessionStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Training Session Date</label>
+        ${(() => {
+          const dates = upcomingDays(60);
+          const options = dates.map(d=>{
+            const ds = fmtDate(d);
+            return `<option value="${ds}" ${b.trainingSessionDate===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
+          }).join('');
+          const placeholder = b.trainingSessionDate ? '' : `<option value="">Select a date…</option>`;
+          return `<select id="trainingSessionDateSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
+        })()}
+        <p class="hint" style="margin-top:6px;">Time is always fixed at <strong>13:00 PHT</strong>.</p>
+      </div>
+      <div class="divider"></div>
+      <div class="field">
+        <label>Scheduling Date</label>
+        ${(() => {
+          const dates = upcomingDays(60);
+          const options = dates.map(d=>{
+            const ds = fmtDate(d);
+            return `<option value="${ds}" ${b.schedulingDate===ds?'selected':''}>${fmtDateLabel(ds)}</option>`;
+          }).join('');
+          const placeholder = b.schedulingDate ? '' : `<option value="">Select a date…</option>`;
+          return `<select id="schedulingDateSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
+        })()}
+      </div>
+      <div class="field">
+        <label>Scheduling Time</label>
+        ${(() => {
+          const options = TIME_15MIN_OPTIONS.map(t=>`<option value="${t}" ${b.schedulingTime===t?'selected':''}>${t}</option>`).join('');
+          const placeholder = b.schedulingTime ? '' : `<option value="">Select a time…</option>`;
+          return `<select id="schedulingTimeSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">${placeholder}${options}</select>`;
+        })()}
+      </div>
+      <div class="field">
+        <label>Scheduling Status</label>
+        <select id="schedulingStatusSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.schedulingStatus?'selected':''}>—</option>
+          ${SCHEDULING_STATUS_OPTIONS.map(s=>`<option value="${s}" ${b.schedulingStatus===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="divider"></div>
+      <div class="field">
+        <label>Device Form</label>
+        <select id="deviceFormSelect" style="width:100%; padding:11px 13px; border:1.5px solid var(--line); border-radius:10px; font-family:inherit;">
+          <option value="" ${!b.deviceFormStatus?'selected':''}>—</option>
+          ${DEVICE_FORM_OPTIONS.map(s=>`<option value="${s}" ${b.deviceFormStatus===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
       <div class="modal-actions">
@@ -2347,7 +2399,12 @@ function attachHandlers(){
               onboardingTime: '',
               signupStatus: '',
               regulationTestStatus: '',
-              trainingSessionStatus: ''
+              trainingSessionStatus: '',
+              trainingSessionDate: '',
+              schedulingDate: '',
+              schedulingTime: '',
+              schedulingStatus: '',
+              deviceFormStatus: ''
             };
             await saveBookings([...bookings, newBooking]);
             // Verify the write actually stuck — the shared storage is "last write wins",
@@ -2890,6 +2947,16 @@ Langdy Team`;
         if(regSel) regSel.onchange = () => saveChecklistField({ regulationTestStatus: regSel.value });
         const trainingSel = $('#trainingSessionSelect');
         if(trainingSel) trainingSel.onchange = () => saveChecklistField({ trainingSessionStatus: trainingSel.value });
+        const trainingDateSel = $('#trainingSessionDateSelect');
+        if(trainingDateSel) trainingDateSel.onchange = () => saveChecklistField({ trainingSessionDate: trainingDateSel.value });
+        const schedDateSel = $('#schedulingDateSelect');
+        if(schedDateSel) schedDateSel.onchange = () => saveChecklistField({ schedulingDate: schedDateSel.value });
+        const schedTimeSel = $('#schedulingTimeSelect');
+        if(schedTimeSel) schedTimeSel.onchange = () => saveChecklistField({ schedulingTime: schedTimeSel.value });
+        const schedStatusSel = $('#schedulingStatusSelect');
+        if(schedStatusSel) schedStatusSel.onchange = () => saveChecklistField({ schedulingStatus: schedStatusSel.value });
+        const deviceFormSel = $('#deviceFormSelect');
+        if(deviceFormSel) deviceFormSel.onchange = () => saveChecklistField({ deviceFormStatus: deviceFormSel.value });
       }
     }
 
