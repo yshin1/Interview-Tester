@@ -546,6 +546,25 @@ function freshApplyForm(){
 }
 let applyForm = freshApplyForm();
 
+function freshSignupForm(){
+  return {
+    tutorName:'', govIdFile:null, govIdFileName:'',
+    email:'', residence:'',
+    kakaoId:'', kakaoScreenshotFile:null, kakaoScreenshotFileName:'',
+    profilePicFile:null, profilePicFileName:'',
+    selfIntroText:'', selfIntroRecordingFile:null, selfIntroRecordingFileName:'',
+    facebookLink:'',
+    qMentionedHobbies:'', qAvoidedPersonalDetails:'', qRecordingMp3:'', qRecordingDuration:'', qVoiceClear:'',
+    qPicCasual:'', qPicNotFormal:'', qPicHighQuality:'', qPicNoHeadset:'',
+    qKakaoNameMatches:'', qKakaoInstalledBoth:'', qKakaoNotifEnabled:'',
+    qLangdyInstalled:'', qLangdyNotifEnabled:'',
+    agree:false,
+    error:'', busy:false, done:false
+  };
+}
+let signupForm = freshSignupForm();
+
+
 let adminTab = 'calendar';
 let calMonthOffset = 0;
 let calShowFirstDemo = true;
@@ -583,7 +602,10 @@ const fbStorage = firebase.storage();
 const KV_COLLECTION = 'kv';
 
 async function uploadApplicationFile(file, applicationId, fieldName){
-  const path = `applications/${applicationId}/${fieldName}_${Date.now()}_${file.name}`;
+  return uploadEntityFile(file, 'applications', applicationId, fieldName);
+}
+async function uploadEntityFile(file, folder, entityId, fieldName){
+  const path = `${folder}/${entityId}/${fieldName}_${Date.now()}_${file.name}`;
   const ref = fbStorage.ref().child(path);
   await ref.put(file);
   return await ref.getDownloadURL();
@@ -688,6 +710,28 @@ async function saveOneApplication(app){
 async function deleteOneApplication(id){
   await db.collection(APPLICATIONS_COLLECTION).doc(id).delete();
   applications = applications.filter(x => x.id !== id);
+}
+
+let accountSignups = [];
+const ACCOUNT_SIGNUPS_COLLECTION = 'accountSignups';
+async function loadAccountSignups(){
+  try{
+    const snap = await db.collection(ACCOUNT_SIGNUPS_COLLECTION).get();
+    accountSignups = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+  }catch(e){
+    accountSignups = [];
+  }
+  return accountSignups;
+}
+async function saveOneAccountSignup(rec){
+  const { id, ...data } = rec;
+  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).set(data);
+  const idx = accountSignups.findIndex(x => x.id === id);
+  if(idx === -1) accountSignups.push(rec); else accountSignups[idx] = rec;
+}
+async function deleteOneAccountSignup(id){
+  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
+  accountSignups = accountSignups.filter(x => x.id !== id);
 }
 
 /* ============================================================
@@ -968,6 +1012,17 @@ function escapeHtml(str){
 function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
 function isValidFullName(v){ return v.trim().length>=2; }
 
+// Small banner shown at the top of Applications / Account Signups tabs with
+// the actual shareable link (?apply or ?signup) and a one-click copy button.
+function renderShareLinkBox(paramName, label){
+  const url = window.location.origin + window.location.pathname + '?' + paramName;
+  return `<div style="display:flex; align-items:center; gap:10px; background:#FAFBFC; border:1.5px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:16px; flex-wrap:wrap;">
+    <span style="font-size:12.5px; font-weight:700; color:var(--slate); white-space:nowrap;">${escapeHtml(label)}:</span>
+    <code style="font-size:12px; background:#fff; padding:5px 9px; border-radius:6px; border:1px solid var(--line); flex:1; min-width:220px; word-break:break-all;">${escapeHtml(url)}</code>
+    <button class="btn btn-ghost btn-sm" data-copy-link="${escapeHtml(url)}" style="width:auto; padding:7px 14px; white-space:nowrap;">📋 Copy link</button>
+  </div>`;
+}
+
 /* ============================================================
    Root render
    ============================================================ */
@@ -1035,6 +1090,7 @@ function showNotionSelectOverlay(rows){
 function render(){
   const app = document.getElementById('app');
   if(view==='apply') app.innerHTML = renderApplyPage();
+  else if(view==='signupForm') app.innerHTML = renderSignupFormPage();
   else if(view==='gate') app.innerHTML = renderGate();
   else if(view==='book') app.innerHTML = renderTopbar(false) + renderBook();
   else if(view==='admin') app.innerHTML = renderTopbar(true) + renderAdmin();
@@ -1235,6 +1291,127 @@ function renderApplyDone(){
   </div>`;
 }
 
+/* ============================================================
+   Account Signup (Account Creation) form
+   ============================================================ */
+function renderSignupFormPage(){
+  if(signupForm.done) return renderSignupFormDone();
+  const f = signupForm;
+  const yesNo = (id, val) => `
+    <select id="${id}">
+      <option value="" ${val===''?'selected':''}>Select…</option>
+      <option value="Yes" ${val==='Yes'?'selected':''}>Yes</option>
+      <option value="No" ${val==='No'?'selected':''}>No</option>
+    </select>`;
+  const fileDrop = (id, label, currentName) => `
+    <div class="file-drop">
+      ${label}
+      <input type="file" id="${id}">
+      ${currentName ? `<div class="fname">Selected: ${escapeHtml(currentName)}</div>` : ''}
+    </div>`;
+
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <h1 class="gate-title">Account Signup</h1>
+      <p class="gate-sub">Please complete this form to finish creating your Langdy tutor account.</p>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Basic Information</div>
+        <div class="field"><label>Enter your Langdy tutor name.</label><input type="text" id="sf_tutorName" value="${escapeHtml(f.tutorName)}"></div>
+        <div class="field">
+          <label>Submit a copy of your government-issued ID (e.g. passport, national identity card) as an image file.</label>
+          ${fileDrop('sf_govId', 'Upload an image file', f.govIdFileName)}
+        </div>
+        <div class="field"><label>Enter your email address.</label><input type="email" id="sf_email" value="${escapeHtml(f.email)}"></div>
+        <div class="field"><label>Enter your current city and country of residence.</label><input type="text" id="sf_residence" value="${escapeHtml(f.residence)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">KakaoTalk</div>
+        <div class="field"><label>Enter your KakaoTalk ID.</label><input type="text" id="sf_kakaoId" value="${escapeHtml(f.kakaoId)}"></div>
+        <div class="field">
+          <label>For confirmation, upload a screenshot of the screen showing your KakaoTalk ID.</label>
+          ${fileDrop('sf_kakaoScreenshot', 'Upload an image file', f.kakaoScreenshotFileName)}
+        </div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Profile &amp; Self-Introduction</div>
+        <div class="field">
+          <label>Upload your profile picture.</label>
+          ${fileDrop('sf_profilePic', 'Upload an image file', f.profilePicFileName)}
+        </div>
+        <div class="field"><label>Write a self-introduction.</label><textarea id="sf_selfIntroText">${escapeHtml(f.selfIntroText)}</textarea></div>
+        <div class="field">
+          <label>Record a self-introduction and upload the recording.</label>
+          ${fileDrop('sf_selfIntroRecording', 'Upload an MP3 file', f.selfIntroRecordingFileName)}
+        </div>
+        <div class="field"><label>Provide the link to your active Facebook profile.</label><input type="text" id="sf_facebookLink" value="${escapeHtml(f.facebookLink)}"></div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Self-Introduction Review</div>
+        <div class="field"><label>Did you mention your hobbies?</label>${yesNo('sf_qMentionedHobbies', f.qMentionedHobbies)}</div>
+        <div class="field"><label>Did you avoid specifying your place of birth, residence, and duration of teaching experience?</label>${yesNo('sf_qAvoidedPersonalDetails', f.qAvoidedPersonalDetails)}</div>
+        <div class="field"><label>Is the recording in MP3 format?</label>${yesNo('sf_qRecordingMp3', f.qRecordingMp3)}</div>
+        <div class="field"><label>Is the recording 15–20 seconds long?</label>${yesNo('sf_qRecordingDuration', f.qRecordingDuration)}</div>
+        <div class="field"><label>Is your voice clear in the recording, without any echo or background noise?</label>${yesNo('sf_qVoiceClear', f.qVoiceClear)}</div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">Profile Picture Review</div>
+        <div class="field"><label>Is your profile picture a casual photo, such as a selfie?</label>${yesNo('sf_qPicCasual', f.qPicCasual)}</div>
+        <div class="field"><label>Is your profile picture free of formal elements, such as an ID photo style?</label>${yesNo('sf_qPicNotFormal', f.qPicNotFormal)}</div>
+        <div class="field"><label>Is your profile picture of high quality and easy to recognize?</label>${yesNo('sf_qPicHighQuality', f.qPicHighQuality)}</div>
+        <div class="field"><label>Is your profile picture free of headsets or similar devices?</label>${yesNo('sf_qPicNoHeadset', f.qPicNoHeadset)}</div>
+      </div>
+
+      <div class="apply-section">
+        <div class="apply-section-title">App Setup</div>
+        <p class="section-desc">Check if the name displayed on your KakaoTalk profile matches your tutor name. If it's different, please change the name on your profile to match your tutor name.</p>
+        <div class="field"><label>Does your KakaoTalk profile name match your tutor name?</label>${yesNo('sf_qKakaoNameMatches', f.qKakaoNameMatches)}</div>
+
+        <p class="section-desc">Install KakaoTalk on BOTH your phone and PC, and enable notifications on each.</p>
+        <div class="field"><label>Did you install KakaoTalk on both your phone and PC?</label>${yesNo('sf_qKakaoInstalledBoth', f.qKakaoInstalledBoth)}</div>
+        <div class="field"><label>Did you enable KakaoTalk notifications?</label>${yesNo('sf_qKakaoNotifEnabled', f.qKakaoNotifEnabled)}</div>
+
+        <p class="section-desc">Install the Langdy app on your phone and enable app notifications. Note: you won't be able to sign in until the admin completes your registration.</p>
+        <div class="field"><label>Did you install the Langdy app on your phone?</label>${yesNo('sf_qLangdyInstalled', f.qLangdyInstalled)}</div>
+        <div class="field"><label>Did you enable Langdy app notifications?</label>${yesNo('sf_qLangdyNotifEnabled', f.qLangdyNotifEnabled)}</div>
+      </div>
+
+      <div class="warn-box strong">
+        <div class="icon">💬</div>
+        <div class="txt">Please inform the admin via KakaoTalk once you have submitted this form. After reviewing your response, the admin will contact you via KakaoTalk during operating hours with preparatory instructions before the orientation.</div>
+      </div>
+
+      <div class="apply-section">
+        <label class="checkbox-item" style="cursor:pointer; margin-top:10px;">
+          <input type="checkbox" id="sf_agree" ${f.agree?'checked':''}>
+          I certify that the information provided above is true to the best of my knowledge and belief. I understand that I will be subject to disciplinary action if any of the above information is found to be false.
+        </label>
+      </div>
+
+      ${f.error ? `<div class="error-text">${escapeHtml(f.error)}</div>` : ''}
+      <button class="btn btn-gold" id="signupSubmitBtn" ${f.busy?'disabled':''}>${f.busy?'Submitting…':'Submit'}</button>
+    </div>
+  </div>`;
+}
+
+function renderSignupFormDone(){
+  return `
+  <div class="apply-wrap">
+    <div class="card">
+      <div class="ticket">
+        <div class="ticket-eyebrow">Submission Received</div>
+        <div class="ticket-name">Thank you, ${escapeHtml(signupForm.tutorName)}!</div>
+        <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:6px 0 0;">We've received your account signup submission. Please message the admin on KakaoTalk to let them know you've submitted — they'll follow up with next steps.</p>
+      </div>
+    </div>
+  </div>`;
+}
+
 
 function renderBook(){
   if(bk.done) return renderBookDone();
@@ -1417,6 +1594,7 @@ function renderAdmin(){
     ['list','1st Demo'],
     ['secondDemo','2nd Demo'],
     ['onboarding','Onboarding'],
+    ['accountSignups','Account Signups'],
     ['chats','Chats'],
     ['dates','Availability'],
     ['capacity','Slot Settings'],
@@ -1432,6 +1610,7 @@ function renderAdmin(){
   else if(adminTab==='list') body = renderAdminList();
   else if(adminTab==='secondDemo') body = renderAdminSecondDemo();
   else if(adminTab==='onboarding') body = renderAdminOnboarding();
+  else if(adminTab==='accountSignups') body = renderAdminAccountSignups();
   else if(adminTab==='chats') body = renderAdminChats();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
@@ -1611,8 +1790,9 @@ let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
 
 function renderAdminApplications(){
+  const shareLinkBox = renderShareLinkBox('apply', 'Application link');
   if(applications.length === 0){
-    return `<div class="card"><div class="empty-state">No applications yet.</div></div>`;
+    return `<div class="card">${shareLinkBox}<div class="empty-state">No applications yet.</div></div>`;
   }
   let filtered = applications;
   if(applicationFilterWorked!=='all') filtered = filtered.filter(a => (a.workedBefore||'')===applicationFilterWorked);
@@ -1646,6 +1826,7 @@ function renderAdminApplications(){
 
   return `
   <div class="card">
+    ${shareLinkBox}
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -1743,6 +1924,96 @@ function renderDeleteApplicationModal(){
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deleteAppNoBtn">Keep it</button>
         <button class="btn btn-danger-outline" id="deleteAppYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+let accountSignupDetailTarget = null;
+let deleteAccountSignupTarget = null;
+
+function renderAdminAccountSignups(){
+  const shareLinkBox = renderShareLinkBox('signup', 'Account Signup link');
+  if(accountSignups.length === 0){
+    return `<div class="card">${shareLinkBox}<div class="empty-state">No account signup submissions yet.</div></div>`;
+  }
+  const sorted = [...accountSignups].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  const rows = sorted.map(s => `
+    <tr>
+      <td><strong>${escapeHtml(s.tutorName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(s.email)}</span></td>
+      <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
+      <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" data-view-signup="${s.id}">View</button>
+          <button class="btn btn-danger-outline btn-sm" data-delete-signup="${s.id}">Delete</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  return `
+  <div class="card">
+    ${shareLinkBox}
+    <table class="list-table">
+      <thead><tr><th>Tutor</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+  ${accountSignupDetailTarget ? renderAccountSignupDetailModal() : ''}
+  ${deleteAccountSignupTarget ? renderDeleteAccountSignupModal() : ''}`;
+}
+
+function renderAccountSignupDetailModal(){
+  const s = accountSignups.find(x => x.id === accountSignupDetailTarget) || {};
+  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+  return `
+  <div class="modal-overlay" id="signupDetailOverlay">
+    <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
+      <h3>${escapeHtml(s.tutorName)}</h3>
+      ${row('Email', s.email)}
+      ${row('Residence', s.residence)}
+      ${linkRow('Government ID', s.govIdUrl)}
+      ${row('KakaoTalk ID', s.kakaoId)}
+      ${linkRow('KakaoTalk screenshot', s.kakaoScreenshotUrl)}
+      ${linkRow('Profile picture', s.profilePicUrl)}
+      ${row('Self-introduction', s.selfIntroText)}
+      ${s.selfIntroRecordingUrl ? `<div class="field"><label>Self-introduction recording</label><audio controls src="${escapeHtml(s.selfIntroRecordingUrl)}" style="width:100%;"></audio></div>` : ''}
+      ${row('Facebook', s.facebookLink)}
+      <div class="divider"></div>
+      ${row('Mentioned hobbies?', s.qMentionedHobbies)}
+      ${row('Avoided personal details?', s.qAvoidedPersonalDetails)}
+      ${row('Recording is MP3?', s.qRecordingMp3)}
+      ${row('Recording 15–20s?', s.qRecordingDuration)}
+      ${row('Voice clear?', s.qVoiceClear)}
+      ${row('Pic casual?', s.qPicCasual)}
+      ${row('Pic not formal?', s.qPicNotFormal)}
+      ${row('Pic high quality?', s.qPicHighQuality)}
+      ${row('Pic no headset?', s.qPicNoHeadset)}
+      ${row('KakaoTalk name matches?', s.qKakaoNameMatches)}
+      ${row('KakaoTalk installed (both)?', s.qKakaoInstalledBoth)}
+      ${row('KakaoTalk notifications on?', s.qKakaoNotifEnabled)}
+      ${row('Langdy app installed?', s.qLangdyInstalled)}
+      ${row('Langdy notifications on?', s.qLangdyNotifEnabled)}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="signupDetailCloseBtn">Close</button>
+        <button class="btn btn-primary" id="signupMarkReviewedBtn">${s.reviewed?'Mark as New':'Mark as Reviewed'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDeleteAccountSignupModal(){
+  const s = accountSignups.find(x => x.id === deleteAccountSignupTarget) || {};
+  return `
+  <div class="modal-overlay" id="deleteSignupOverlay">
+    <div class="modal">
+      <h3>Delete this submission?</h3>
+      <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:0 0 4px;">
+        This will permanently remove <strong>${escapeHtml(s.tutorName)}</strong>'s account signup submission. This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="deleteSignupNoBtn">Keep it</button>
+        <button class="btn btn-danger-outline" id="deleteSignupYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
       </div>
     </div>
   </div>`;
@@ -2518,6 +2789,105 @@ function attachHandlers(){
     };
   }
 
+  if(view==='signupForm' && !signupForm.done){
+    const f = signupForm;
+    const bindText = (id, key) => { const el = $(id); if(el) el.oninput = e => { f[key] = e.target.value; }; };
+    bindText('#sf_tutorName','tutorName');
+    bindText('#sf_email','email');
+    bindText('#sf_residence','residence');
+    bindText('#sf_kakaoId','kakaoId');
+    bindText('#sf_selfIntroText','selfIntroText');
+    bindText('#sf_facebookLink','facebookLink');
+
+    const bindSelect = (id, key) => { const el = $(id); if(el) el.onchange = e => { f[key] = e.target.value; }; };
+    bindSelect('#sf_qMentionedHobbies','qMentionedHobbies');
+    bindSelect('#sf_qAvoidedPersonalDetails','qAvoidedPersonalDetails');
+    bindSelect('#sf_qRecordingMp3','qRecordingMp3');
+    bindSelect('#sf_qRecordingDuration','qRecordingDuration');
+    bindSelect('#sf_qVoiceClear','qVoiceClear');
+    bindSelect('#sf_qPicCasual','qPicCasual');
+    bindSelect('#sf_qPicNotFormal','qPicNotFormal');
+    bindSelect('#sf_qPicHighQuality','qPicHighQuality');
+    bindSelect('#sf_qPicNoHeadset','qPicNoHeadset');
+    bindSelect('#sf_qKakaoNameMatches','qKakaoNameMatches');
+    bindSelect('#sf_qKakaoInstalledBoth','qKakaoInstalledBoth');
+    bindSelect('#sf_qKakaoNotifEnabled','qKakaoNotifEnabled');
+    bindSelect('#sf_qLangdyInstalled','qLangdyInstalled');
+    bindSelect('#sf_qLangdyNotifEnabled','qLangdyNotifEnabled');
+
+    const bindFile = (id, fileKey, nameKey) => {
+      const el = $(id);
+      if(el) el.onchange = e => {
+        const file = e.target.files[0];
+        f[fileKey] = file || null;
+        f[nameKey] = file ? file.name : '';
+        render();
+      };
+    };
+    bindFile('#sf_govId','govIdFile','govIdFileName');
+    bindFile('#sf_kakaoScreenshot','kakaoScreenshotFile','kakaoScreenshotFileName');
+    bindFile('#sf_profilePic','profilePicFile','profilePicFileName');
+    bindFile('#sf_selfIntroRecording','selfIntroRecordingFile','selfIntroRecordingFileName');
+
+    const agreeEl = $('#sf_agree');
+    if(agreeEl) agreeEl.onchange = e => { f.agree = e.target.checked; };
+
+    const submitBtn = $('#signupSubmitBtn');
+    if(submitBtn) submitBtn.onclick = async () => {
+      f.error = '';
+      if(!f.tutorName.trim() || !f.email.trim()){
+        f.error = 'Please fill in at least your tutor name and email.'; render(); return;
+      }
+      if(!f.agree){
+        f.error = 'Please check the certification box before submitting.'; render(); return;
+      }
+      f.busy = true; render();
+      try{
+        const signupId = 'signup_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        let govIdUrl = '', kakaoScreenshotUrl = '', profilePicUrl = '', selfIntroRecordingUrl = '';
+        if(f.govIdFile) govIdUrl = await uploadEntityFile(f.govIdFile, 'accountSignups', signupId, 'govId');
+        if(f.kakaoScreenshotFile) kakaoScreenshotUrl = await uploadEntityFile(f.kakaoScreenshotFile, 'accountSignups', signupId, 'kakaoScreenshot');
+        if(f.profilePicFile) profilePicUrl = await uploadEntityFile(f.profilePicFile, 'accountSignups', signupId, 'profilePic');
+        if(f.selfIntroRecordingFile) selfIntroRecordingUrl = await uploadEntityFile(f.selfIntroRecordingFile, 'accountSignups', signupId, 'selfIntroRecording');
+        const record = {
+          id: signupId,
+          tutorName: f.tutorName.trim(),
+          govIdUrl,
+          email: f.email.trim(),
+          residence: f.residence.trim(),
+          kakaoId: f.kakaoId.trim(),
+          kakaoScreenshotUrl,
+          profilePicUrl,
+          selfIntroText: f.selfIntroText.trim(),
+          selfIntroRecordingUrl,
+          facebookLink: f.facebookLink.trim(),
+          qMentionedHobbies: f.qMentionedHobbies,
+          qAvoidedPersonalDetails: f.qAvoidedPersonalDetails,
+          qRecordingMp3: f.qRecordingMp3,
+          qRecordingDuration: f.qRecordingDuration,
+          qVoiceClear: f.qVoiceClear,
+          qPicCasual: f.qPicCasual,
+          qPicNotFormal: f.qPicNotFormal,
+          qPicHighQuality: f.qPicHighQuality,
+          qPicNoHeadset: f.qPicNoHeadset,
+          qKakaoNameMatches: f.qKakaoNameMatches,
+          qKakaoInstalledBoth: f.qKakaoInstalledBoth,
+          qKakaoNotifEnabled: f.qKakaoNotifEnabled,
+          qLangdyInstalled: f.qLangdyInstalled,
+          qLangdyNotifEnabled: f.qLangdyNotifEnabled,
+          submittedAt: new Date().toISOString(),
+          reviewed: false
+        };
+        await saveOneAccountSignup(record);
+        f.busy = false; f.done = true; render();
+      }catch(e){
+        console.error('SIGNUP SUBMIT ERROR:', e);
+        f.busy = false;
+        f.error = 'Something went wrong submitting this form. Please try again.'; render();
+      }
+    };
+  }
+
   if(view==='gate'){
     if(gateMode==='code'){
       const submit = async () => {
@@ -2527,6 +2897,7 @@ function attachHandlers(){
         await loadBookings();
         if(val === config.adminCode){
           await loadApplications();
+          await loadAccountSignups();
           view='admin'; gateBusy=false; render();
         } else if(val === config.applicantCode){
           view='book'; gateBusy=false; render();
@@ -2710,6 +3081,20 @@ function attachHandlers(){
       el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
 
+    $$('[data-copy-link]').forEach(el=>{
+      el.onclick = async () => {
+        const url = el.dataset.copyLink;
+        const originalText = el.textContent;
+        try{
+          await navigator.clipboard.writeText(url);
+          el.textContent = '✓ Copied!';
+        }catch(e){
+          el.textContent = 'Copy failed — select manually';
+        }
+        setTimeout(() => { el.textContent = originalText; }, 2000);
+      };
+    });
+
     if(adminTab==='applications'){
       startApplicationsPolling();
     } else {
@@ -2842,6 +3227,36 @@ Langdy Team`;
           await deleteOneApplication(id);
           selectedApplicationIds.delete(id);
           deleteApplicationTarget = null;
+          render();
+        };
+      }
+    }
+
+    if(adminTab==='accountSignups'){
+      $$('[data-view-signup]').forEach(el=>{
+        el.onclick = () => { accountSignupDetailTarget = el.dataset.viewSignup; render(); };
+      });
+      $$('[data-delete-signup]').forEach(el=>{
+        el.onclick = () => { deleteAccountSignupTarget = el.dataset.deleteSignup; render(); };
+      });
+      if(accountSignupDetailTarget){
+        $('#signupDetailCloseBtn').onclick = () => { accountSignupDetailTarget=null; render(); };
+        $('#signupDetailOverlay').onclick = (e) => { if(e.target.id==='signupDetailOverlay'){ accountSignupDetailTarget=null; render(); } };
+        $('#signupMarkReviewedBtn').onclick = async () => {
+          const s = accountSignups.find(x=>x.id===accountSignupDetailTarget);
+          if(!s) return;
+          const updated = Object.assign({}, s, { reviewed: !s.reviewed });
+          await saveOneAccountSignup(updated);
+          render();
+        };
+      }
+      if(deleteAccountSignupTarget){
+        $('#deleteSignupNoBtn').onclick = () => { deleteAccountSignupTarget=null; render(); };
+        $('#deleteSignupOverlay').onclick = (e) => { if(e.target.id==='deleteSignupOverlay'){ deleteAccountSignupTarget=null; render(); } };
+        $('#deleteSignupYesBtn').onclick = async () => {
+          const id = deleteAccountSignupTarget;
+          await deleteOneAccountSignup(id);
+          deleteAccountSignupTarget = null;
           render();
         };
       }
@@ -3385,6 +3800,7 @@ Langdy Team`;
 (async function init(){
   const params = new URLSearchParams(window.location.search);
   if(params.has('apply')) view = 'apply';
+  else if(params.has('signup')) view = 'signupForm';
   await Promise.all([loadConfig(), loadBookings()]);
   render();
 })();
