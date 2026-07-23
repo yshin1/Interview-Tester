@@ -212,6 +212,14 @@
   }
   .admin-tab.active{ color:var(--navy); border-bottom-color:var(--gold); }
   .admin-tab:hover{ color:var(--navy); }
+  .admin-subtabs{ display:flex; gap:8px; margin:-14px 0 22px; flex-wrap:wrap; }
+  .admin-subtab{
+    padding:7px 14px; font-size:12.5px; font-weight:700; color:var(--slate-light); cursor:pointer;
+    border-radius:100px; background:#F5F6F8; user-select:none; transition:.12s;
+  }
+  .admin-subtab.active{ color:#fff; background:var(--navy); }
+  .admin-subtab:hover{ color:var(--navy); }
+  .admin-subtab.active:hover{ color:#fff; }
 
   /* ---------- calendar ---------- */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -1609,22 +1617,43 @@ function renderChatPanel(bookingId, viewerRole){
 /* ============================================================
    Admin screens
    ============================================================ */
+const TAB_GROUPS = [
+  { label: 'Calendar', tab: 'calendar' },
+  { label: 'Applications', tab: 'applications' },
+  { label: 'Demo', children: [
+      ['list','1st Demo'],
+      ['secondDemo','2nd Demo'],
+      ['dates','Availability'],
+      ['capacity','Slot Settings']
+    ]
+  },
+  { label: 'Onboarding', children: [
+      ['onboarding','Onboarding'],
+      ['accountSignups','Account Signups']
+    ]
+  },
+  { label: 'Chat', tab: 'chats' },
+  { label: 'Access Codes', tab: 'codes' }
+];
+function findTabGroup(tab){
+  for(const g of TAB_GROUPS){
+    if(g.tab === tab) return g;
+    if(g.children && g.children.some(([k])=>k===tab)) return g;
+  }
+  return TAB_GROUPS[0];
+}
+
 function renderAdmin(){
-  const tabs = [
-    ['applications','Applications'],
-    ['calendar','Calendar'],
-    ['list','1st Demo'],
-    ['secondDemo','2nd Demo'],
-    ['onboarding','Onboarding'],
-    ['accountSignups','Account Signups'],
-    ['chats','Chats'],
-    ['dates','Availability'],
-    ['capacity','Slot Settings'],
-    ['codes','Access Codes'],
-  ];
-  const tabsHtml = tabs.map(([k,label]) =>
-    `<div class="admin-tab ${adminTab===k?'active':''}" data-tab="${k}">${label}</div>`
-  ).join('');
+  const currentGroup = findTabGroup(adminTab);
+  const primaryTabsHtml = TAB_GROUPS.map(g => {
+    const isActive = g === currentGroup;
+    const clickTarget = g.tab || g.children[0][0]; // groups with children default to their first sub-tab
+    return `<div class="admin-tab ${isActive?'active':''}" data-group-tab="${clickTarget}">${g.label}</div>`;
+  }).join('');
+  const subTabsHtml = currentGroup.children ? `
+    <div class="admin-subtabs">
+      ${currentGroup.children.map(([k,label]) => `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}</div>`).join('')}
+    </div>` : '';
 
   let body = '';
   if(adminTab==='applications') body = renderAdminApplications();
@@ -1640,7 +1669,8 @@ function renderAdmin(){
 
   return `
   <div class="admin-wrap">
-    <div class="admin-tabs">${tabsHtml}</div>
+    <div class="admin-tabs">${primaryTabsHtml}</div>
+    ${subTabsHtml}
     ${body}
     ${editingBooking ? renderEditModal() : ''}
     ${cancelTarget ? renderCancelModal() : ''}
@@ -3100,7 +3130,10 @@ function attachHandlers(){
   }
 
   if(view==='admin'){
-    $$('.admin-tab').forEach(el=>{
+    $$('[data-group-tab]').forEach(el=>{
+      el.onclick = () => { adminTab = el.dataset.groupTab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+    });
+    $$('[data-tab]').forEach(el=>{
       el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
 
