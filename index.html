@@ -2928,6 +2928,19 @@ const FIELD_TYPE_LABELS = {
   image: 'Reference image'
 };
 
+let formBuilderPreviewOpen = { apply: false, device: false };
+
+function renderFormPreview(formKey, schema){
+  const previewState = { answers:{}, files:{} };
+  return `
+  <div style="border:2px dashed var(--gold-dark); border-radius:12px; padding:18px; background:#FFFDF7; margin-bottom:16px;">
+    <div style="font-size:11.5px; font-weight:700; color:var(--gold-dark); margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px;">👁 Preview — this is roughly what applicants will see (not fillable here)</div>
+    <div style="pointer-events:none; opacity:0.85;">
+      ${renderDynamicForm(formKey, schema, previewState)}
+    </div>
+  </div>`;
+}
+
 function renderFormBuilder(formKey){
   const draft = getFormBuilderDraft(formKey);
   const formLabel = formKey==='apply' ? 'Apply' : 'Device Submission';
@@ -2953,7 +2966,11 @@ function renderFormBuilder(formKey){
 
   return `
   <div class="card">
-    <p class="section-desc" style="margin-bottom:14px;">Edit the questions shown on the <strong>${formLabel}</strong> form (<code>?${formKey}</code>). Add, remove, reorder, or rename fields. Changes only take effect on the live form after you click "Save Changes" below.</p>
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+      <p class="section-desc" style="margin:0;">Edit the questions shown on the <strong>${formLabel}</strong> form (<code>?${formKey}</code>). Add, remove, reorder, or rename fields. Changes only take effect on the live form after you click "Save Changes" below.</p>
+      <button class="btn btn-ghost btn-sm" id="fbTogglePreviewBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">${formBuilderPreviewOpen[formKey] ? '✕ Hide preview' : '👁 Show preview'}</button>
+    </div>
+    ${formBuilderPreviewOpen[formKey] ? renderFormPreview(formKey, draft) : ''}
     ${formBuilderSavedFlash[formKey] ? `<div style="background:var(--gold-bg); border:1px solid var(--gold-dark); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px;">✓ Saved — the live form now reflects these changes.</div>` : ''}
     <div id="formBuilderRows">${rows}</div>
     <div style="display:flex; gap:8px; align-items:center; margin:16px 0;">
@@ -4141,6 +4158,7 @@ Langdy Team`;
           draft[i].label = el.value;
           formBuilderSavedFlash[formKey] = false;
         };
+        el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
       });
       $$('[data-fb-options]').forEach(el=>{
         el.oninput = () => {
@@ -4148,6 +4166,7 @@ Langdy Team`;
           draft[i].options = el.value.split('\n').map(s=>s.trim()).filter(Boolean);
           formBuilderSavedFlash[formKey] = false;
         };
+        el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
       });
       $$('[data-fb-up]').forEach(el=>{
         el.onclick = () => {
@@ -4175,6 +4194,10 @@ Langdy Team`;
           render();
         };
       });
+      $('#fbTogglePreviewBtn').onclick = () => {
+        formBuilderPreviewOpen[formKey] = !formBuilderPreviewOpen[formKey];
+        render();
+      };
       $('#fbAddFieldBtn').onclick = () => {
         const type = $('#fbNewFieldType').value;
         draft.push({ id: 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), type, label: '', options: type==='select' ? [] : undefined });
