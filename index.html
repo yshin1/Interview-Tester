@@ -9,6 +9,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --navy:#16233F;
@@ -1368,6 +1369,49 @@ function renderShareLinkBox(paramName, label){
   </div>`;
 }
 
+// Exports a list of dynamic-form submissions to a downloadable .xlsx file,
+// using the CURRENT schema's field labels as column headers so the sheet
+// reads the same way the live form does. Runs entirely client-side (SheetJS).
+function exportSubmissionsToExcel(records, schema, filenamePrefix){
+  if(typeof XLSX === 'undefined'){
+    alert("Couldn't load the Excel export library — check your internet connection and try again.");
+    return;
+  }
+  const fields = (schema || []).filter(f => !['section','image','notice'].includes(f.type));
+  const usedHeaders = {};
+  const headerFor = (field) => {
+    let base = (field.label || field.id || 'Field').replace(/\s+/g, ' ').trim() || field.id;
+    let header = base;
+    let n = 2;
+    while(usedHeaders[header]){ header = `${base} (${n})`; n++; }
+    usedHeaders[header] = true;
+    return header;
+  };
+  const fieldHeaders = fields.map(f => ({ field: f, header: headerFor(f) }));
+  const sorted = [...records].sort((a,b) => new Date(a.submittedAt||0) - new Date(b.submittedAt||0));
+  const rows = sorted.map(r => {
+    const row = {};
+    fieldHeaders.forEach(({field, header}) => {
+      let val;
+      if(field.type === 'file'){
+        val = r[field.id+'Url'] || '';
+      } else if(field.type === 'checkbox'){
+        val = r[field.id] ? 'Yes' : 'No';
+      } else {
+        val = r[field.id];
+      }
+      row[header] = (val === undefined || val === null) ? '' : val;
+    });
+    row['Submitted At'] = r.submittedAt ? new Date(r.submittedAt).toLocaleString('en-US') : '';
+    return row;
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Submissions');
+  const dateStr = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `${filenamePrefix}_${dateStr}.xlsx`);
+}
+
 /* ============================================================
    Root render
    ============================================================ */
@@ -2130,6 +2174,7 @@ function renderAdminApplications(){
   return `
   <div class="card">
     ${shareLinkBox}
+    <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -2303,6 +2348,7 @@ function renderAdminAccountSignups(){
   return `
   <div class="card">
     ${shareLinkBox}
+    <button class="btn btn-ghost btn-sm" id="exportSignupsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     ${filterBar}
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Submitted</th><th>Reviewed</th><th>Account Status</th><th>Manage</th></tr></thead>
@@ -2406,6 +2452,7 @@ function renderAdminDeviceSubmissions(){
   return `
   <div class="card">
     ${shareLinkBox}
+    <button class="btn btn-ghost btn-sm" id="exportDeviceExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -3665,6 +3712,10 @@ function attachHandlers(){
     }
 
     if(adminTab==='applications'){
+      const exportBtn = $('#exportApplicationsExcelBtn');
+      if(exportBtn) exportBtn.onclick = () => {
+        exportSubmissionsToExcel(applications, formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA, 'Langdy_Applications');
+      };
       const buildInviteBody = (name) => `Hi ${name},
 
 Congratulations! You've been selected to move forward with your 1st Demo class.
@@ -3790,6 +3841,10 @@ Langdy Team`;
     }
 
     if(adminTab==='accountSignups'){
+      const exportBtn = $('#exportSignupsExcelBtn');
+      if(exportBtn) exportBtn.onclick = () => {
+        exportSubmissionsToExcel(accountSignups, formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA, 'Langdy_AccountSignups');
+      };
       const filterCheckbox = $('#signupFilterIncompleteCheckbox');
       if(filterCheckbox) filterCheckbox.onchange = e => { signupFilterIncomplete = e.target.checked; render(); };
       $$('[data-signup-account-status]').forEach(el=>{
@@ -3836,6 +3891,10 @@ Langdy Team`;
     }
 
     if(adminTab==='deviceSubmissions'){
+      const exportBtn = $('#exportDeviceExcelBtn');
+      if(exportBtn) exportBtn.onclick = () => {
+        exportSubmissionsToExcel(deviceSubmissions, formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA, 'Langdy_DeviceSubmissions');
+      };
       $$('[data-view-device]').forEach(el=>{
         el.onclick = () => { deviceSubmissionDetailTarget = el.dataset.viewDevice; render(); };
       });
