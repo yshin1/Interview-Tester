@@ -331,6 +331,20 @@ const FORM_SCHEMAS_KEY = 'form-schemas';
 // the built-in defaults (defined further below) until an admin customizes
 // them, at which point the customized version is what everyone sees.
 let formSchemas = { apply: null, device: null };
+
+// One-time-per-load migration: if a field's label has multiple lines (from
+// before "description" existed as its own thing), split it so the first
+// line becomes the title and everything after becomes the description.
+// Leaves fields that already have a description, or a single-line label,
+// untouched.
+function migrateSchemaFieldDescriptions(schema){
+  return (schema || []).map(field => {
+    if(field.description || !field.label || !field.label.includes('\n')) return field;
+    const lines = field.label.split('\n');
+    return Object.assign({}, field, { label: lines[0], description: lines.slice(1).join('\n') });
+  });
+}
+
 async function loadFormSchemas(){
   try{
     const res = await storage.get(FORM_SCHEMAS_KEY);
@@ -341,6 +355,8 @@ async function loadFormSchemas(){
     formSchemas.apply = APPLY_FORM_DEFAULT_SCHEMA;
     formSchemas.device = DEVICE_FORM_DEFAULT_SCHEMA;
   }
+  formSchemas.apply = migrateSchemaFieldDescriptions(formSchemas.apply);
+  formSchemas.device = migrateSchemaFieldDescriptions(formSchemas.device);
   return formSchemas;
 }
 async function saveFormSchemas(){
@@ -1411,22 +1427,27 @@ function renderGate(){
 /* ============================================================
    Application (job application) screens
    ============================================================ */
+function renderFieldLabelBlock(field){
+  const desc = field.description ? `<div style="font-size:12px; color:var(--slate-light); font-weight:400; margin-top:2px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : '';
+  return `<label style="white-space:pre-wrap; font-size:14.5px; font-weight:600; display:block;">${escapeHtml(field.label)}</label>${desc}`;
+}
 function renderDynamicField(formKey, field, value, fileName){
   const idAttr = `df_${formKey}_${field.id}`;
+  const labelBlock = renderFieldLabelBlock(field);
   switch(field.type){
     case 'section':
-      return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap;">${escapeHtml(field.label)}</div>`;
+      return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap;">${escapeHtml(field.label)}</div>${field.description ? `<div style="font-size:12px; color:var(--slate-light); margin:-8px 0 10px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : ''}`;
     case 'text':
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
-      return `<div class="field"><label style="white-space:pre-wrap;">${escapeHtml(field.label)}</label><textarea id="${idAttr}" rows="3" style="resize:vertical; min-height:66px;">${escapeHtml(value||'')}</textarea></div>`;
+      return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="3" style="resize:vertical; min-height:66px;">${escapeHtml(value||'')}</textarea></div>`;
     case 'select':
-      return `<div class="field"><label style="white-space:pre-wrap;">${escapeHtml(field.label)}</label><select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
+      return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
     case 'yesno':
-      return `<div class="field"><label style="white-space:pre-wrap;">${escapeHtml(field.label)}</label><select id="${idAttr}"><option value="">Select…</option><option value="Yes" ${value==='Yes'?'selected':''}>Yes</option><option value="No" ${value==='No'?'selected':''}>No</option></select></div>`;
+      return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option><option value="Yes" ${value==='Yes'?'selected':''}>Yes</option><option value="No" ${value==='No'?'selected':''}>No</option></select></div>`;
     case 'file':
-      return `<div class="field"><label style="white-space:pre-wrap;">${escapeHtml(field.label)}</label><div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
+      return `<div class="field">${labelBlock}<div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
     case 'image':
-      return `<div class="field"><label style="white-space:pre-wrap;">${escapeHtml(field.label)}</label><img src="data:image/jpeg;base64,${BACKUP_INTERNET_REF_IMAGE}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
+      return `<div class="field">${labelBlock}<img src="data:image/jpeg;base64,${BACKUP_INTERNET_REF_IMAGE}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
     default:
       return '';
   }
@@ -2914,7 +2935,8 @@ let formBuilderSavedFlash = { apply: false, device: false };
 function getFormBuilderDraft(formKey){
   if(!formBuilderDraft[formKey]){
     const base = formSchemas[formKey] || (formKey==='apply' ? APPLY_FORM_DEFAULT_SCHEMA : DEVICE_FORM_DEFAULT_SCHEMA);
-    formBuilderDraft[formKey] = JSON.parse(JSON.stringify(base)).map(f => f.type==='textarea' ? Object.assign({}, f, {type:'text'}) : f);
+    const normalizedTypes = JSON.parse(JSON.stringify(base)).map(f => f.type==='textarea' ? Object.assign({}, f, {type:'text'}) : f);
+    formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(normalizedTypes);
   }
   return formBuilderDraft[formKey];
 }
@@ -2957,8 +2979,11 @@ function renderFormBuilder(formKey){
         <button class="btn btn-ghost btn-sm" data-fb-down="${i}" ${i===draft.length-1?'disabled':''} style="width:auto; padding:8px 12px;">↓</button>
         <button class="btn btn-danger-outline btn-sm" data-fb-delete="${i}" style="width:auto; padding:8px 12px;">✕ Remove</button>
       </div>
+      <div style="margin-top:8px; margin-left:36px;">
+        <textarea data-fb-desc="${i}" placeholder="Description (optional, shown smaller under the label)" rows="1" style="width:100%; resize:vertical; padding:7px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:12px; font-family:inherit; color:var(--slate-light);">${escapeHtml(field.description||'')}</textarea>
+      </div>
       ${field.type==='select' ? `
-      <div style="margin-top:8px;">
+      <div style="margin-top:8px; margin-left:36px;">
         <label style="font-size:12px; color:var(--slate-light); display:block; margin-bottom:4px;">Options (one per line)</label>
         <textarea data-fb-options="${i}" style="width:100%; min-height:70px; font-size:12.5px; font-family:inherit; padding:8px 10px; border:1.5px solid var(--line); border-radius:8px;">${escapeHtml((field.options||[]).join('\n'))}</textarea>
       </div>` : ''}
@@ -4160,6 +4185,14 @@ Langdy Team`;
         };
         el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
       });
+      $$('[data-fb-desc]').forEach(el=>{
+        el.oninput = () => {
+          const i = Number(el.dataset.fbDesc);
+          draft[i].description = el.value;
+          formBuilderSavedFlash[formKey] = false;
+        };
+        el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
+      });
       $$('[data-fb-options]').forEach(el=>{
         el.oninput = () => {
           const i = Number(el.dataset.fbOptions);
@@ -4200,7 +4233,7 @@ Langdy Team`;
       };
       $('#fbAddFieldBtn').onclick = () => {
         const type = $('#fbNewFieldType').value;
-        draft.push({ id: 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), type, label: '', options: type==='select' ? [] : undefined });
+        draft.push({ id: 'custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,6), type, label: '', description: '', options: type==='select' ? [] : undefined });
         formBuilderSavedFlash[formKey] = false;
         render();
       };
