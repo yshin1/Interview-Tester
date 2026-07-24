@@ -4730,7 +4730,13 @@ Langdy Team`;
       currentAdminUser = user;
       if(user){
         adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
-        if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
+        // Only auto-jump to the admin dashboard when this pageview came in
+        // through the dedicated ?admin link (or we're already there this
+        // session). Visiting the plain shared link should always show the
+        // ordinary access-code screen, even if an admin session happens to
+        // be persisted in this browser — the two are meant to stay separate.
+        const shouldEnterAdmin = cameFromAdminLink || view === 'admin';
+        if(shouldEnterAdmin && view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
           try{
             await loadAllAdminData();
           }catch(e){
