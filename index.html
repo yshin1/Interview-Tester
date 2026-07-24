@@ -3217,6 +3217,7 @@ function renderAdminAccountSection(){
   <div class="card" style="margin-bottom:16px;">
     <div class="section-title">Admin Account</div>
     <div class="section-desc">Signed in as <strong>${escapeHtml(currentAdminUser ? currentAdminUser.email : '—')}</strong></div>
+    ${renderShareLinkBox('admin', 'Admin sign-in link')}
 
     <div class="field">
       <label>Current Password</label>
@@ -4678,6 +4679,7 @@ Langdy Team`;
   if(params.has('apply')) view = 'apply';
   else if(params.has('signup')) view = 'signupForm';
   else if(params.has('device')) view = 'deviceForm';
+  else if(params.has('admin')) gateMode = 'adminLogin';
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
   // Firebase persists the signed-in admin across reloads by default, so this
@@ -4686,7 +4688,10 @@ Langdy Team`;
   // Auth ever fails to initialize, the rest of the app still renders instead
   // of the page going blank.
   try{
+    let authInitialCheckDone = false;
     firebase.auth().onAuthStateChanged(async (user) => {
+      const isInitialCheck = !authInitialCheckDone;
+      authInitialCheckDone = true;
       currentAdminUser = user;
       if(user){
         adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
@@ -4695,7 +4700,11 @@ Langdy Team`;
           view = 'admin';
         }
       } else {
-        adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+        adminLoginBusy = false; adminLoginError = '';
+        // Only force back to the plain code gate on a real sign-out — not on
+        // the very first check, so a direct ?admin link still lands on the
+        // admin sign-in form instead of being reset to the code screen.
+        if(!isInitialCheck) gateMode = 'code';
         if(view === 'admin') view = 'gate';
       }
       render();
