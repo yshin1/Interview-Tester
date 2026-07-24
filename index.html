@@ -1510,6 +1510,10 @@ function renderTopbar(isAdmin){
    ============================================================ */
 
 let gateMode = 'code'; // 'code' | 'find' | 'adminLogin'
+// Remembers whether this visit came in via the dedicated ?admin link, so that
+// logging out lands back on the admin sign-in form instead of the plain
+// applicant access-code screen.
+let cameFromAdminLink = false;
 
 // Firebase Authentication state for the admin. `currentAdminUser` mirrors
 // firebase.auth().currentUser and persists across reloads automatically
@@ -4710,7 +4714,7 @@ Langdy Team`;
   if(params.has('apply')) view = 'apply';
   else if(params.has('signup')) view = 'signupForm';
   else if(params.has('device')) view = 'deviceForm';
-  else if(params.has('admin')) gateMode = 'adminLogin';
+  else if(params.has('admin')){ gateMode = 'adminLogin'; cameFromAdminLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
   // Firebase persists the signed-in admin across reloads by default, so this
@@ -4736,10 +4740,10 @@ Langdy Team`;
         }
       } else {
         adminLoginBusy = false; adminLoginError = '';
-        // Only force back to the plain code gate on a real sign-out — not on
-        // the very first check, so a direct ?admin link still lands on the
-        // admin sign-in form instead of being reset to the code screen.
-        if(!isInitialCheck) gateMode = 'code';
+        // On a real sign-out (not the very first check on page load), go
+        // back to the admin sign-in form if this session started from the
+        // ?admin link — otherwise the plain applicant access-code screen.
+        if(!isInitialCheck) gateMode = cameFromAdminLink ? 'adminLogin' : 'code';
         if(view === 'admin') view = 'gate';
       }
       render();
