@@ -812,7 +812,7 @@ let datesMonthOffset = 0;
 let editingBooking = null;   // booking object being reassigned by admin
 let chatTarget = null;       // booking whose chat modal is open (admin side)
 let editDate = null, editTime = null, editError = '';
-let codeChangeState = { authCode:'', newApplicant:'', newAdmin:'', error:'', success:'', busy:false };
+let codeChangeState = { newApplicant:'', error:'', success:'', busy:false };
 let capacityDraft = null;
 let capacityDayTab = 1; // 1=Mon .. 5=Fri
 let capacitySaving = false;
@@ -1508,13 +1508,48 @@ function renderTopbar(isAdmin){
    Gate screen
    ============================================================ */
 
-let gateMode = 'code'; // 'code' | 'find'
+let gateMode = 'code'; // 'code' | 'find' | 'adminLogin'
+
+// Firebase Authentication state for the admin. `currentAdminUser` mirrors
+// firebase.auth().currentUser and persists across reloads automatically
+// (Firebase's default web persistence) — no localStorage code needed here.
+let currentAdminUser = null;
+let adminLoginEmail = '';
+let adminLoginPassword = '';
+let adminLoginError = '';
+let adminLoginBusy = false;
+let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
+
+async function loadAllAdminData(){
+  await Promise.all([loadBookings(), loadApplications(), loadAccountSignups(), loadDeviceSubmissions()]);
+}
 let findEmail = '';
 let findError = '';
 let findBusy = false;
 let foundBookingId = null;
 
 function renderGate(){
+  if(gateMode === 'adminLogin'){
+    return `
+    <div class="center-screen">
+      <div class="card gate-card">
+        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <h1 class="gate-title">Admin Sign In</h1>
+        <p class="gate-sub">Sign in with your admin email and password.</p>
+        <div class="field">
+          <label for="adminLoginEmailInput">Email</label>
+          <input type="email" id="adminLoginEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(adminLoginEmail)}" ${adminLoginBusy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="adminLoginPasswordInput">Password</label>
+          <input type="password" id="adminLoginPasswordInput" placeholder="Password" autocomplete="current-password" ${adminLoginBusy?'disabled':''}>
+        </div>
+        <button class="btn btn-primary" id="adminLoginSubmit" ${adminLoginBusy?'disabled':''}>${adminLoginBusy?'Signing in…':'Sign In'}</button>
+        ${adminLoginError ? `<div class="error-text">${escapeHtml(adminLoginError)}</div>` : ''}
+        <button class="find-link" id="gateSwitchToCodeFromAdmin" style="display:block; margin-top:14px;">← Back to access code</button>
+      </div>
+    </div>`;
+  }
   if(gateMode === 'find'){
     return `
     <div class="center-screen">
@@ -1545,6 +1580,7 @@ function renderGate(){
       <button class="btn btn-primary" id="gateSubmit" ${gateBusy?'disabled':''}>${gateBusy?'Checking…':'Enter'}</button>
       ${gateError ? `<div class="error-text">${escapeHtml(gateError)}</div>` : ''}
       <button class="find-link" id="gateSwitchToFind">Already booked? Find your chat →</button>
+      <button class="find-link" id="gateSwitchToAdmin" style="display:block; margin-top:8px;">Admin? Sign in →</button>
     </div>
   </div>`;
 }
@@ -3174,31 +3210,52 @@ function renderFormBuilder(formKey){
 }
 
 
+function renderAdminAccountSection(){
+  const p = changePasswordState;
+  return `
+  <div class="card" style="margin-bottom:16px;">
+    <div class="section-title">Admin Account</div>
+    <div class="section-desc">Signed in as <strong>${escapeHtml(currentAdminUser ? currentAdminUser.email : '—')}</strong></div>
+
+    <div class="field">
+      <label>Current Password</label>
+      <input type="password" id="cpCurrentInput" placeholder="Enter your current password" value="${escapeHtml(p.currentPassword)}" autocomplete="current-password">
+    </div>
+    <div class="field">
+      <label>New Password</label>
+      <input type="password" id="cpNewInput" placeholder="At least 6 characters" value="${escapeHtml(p.newPassword)}" autocomplete="new-password">
+    </div>
+    <div class="field">
+      <label>Confirm New Password</label>
+      <input type="password" id="cpConfirmInput" placeholder="Re-enter new password" value="${escapeHtml(p.confirmPassword)}" autocomplete="new-password">
+    </div>
+    ${p.error ? `<div class="error-text">${escapeHtml(p.error)}</div>` : ''}
+    ${p.success ? `<div class="success-text">${escapeHtml(p.success)}</div>` : ''}
+    <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+      <button class="btn btn-primary" style="width:auto; padding:12px 26px;" id="changePasswordBtn" ${p.busy?'disabled':''}>${p.busy?'Saving…':'Change Password'}</button>
+      <button class="btn btn-ghost" style="width:auto; padding:12px 20px;" id="adminLogoutBtn">Log Out</button>
+    </div>
+  </div>`;
+}
+
 function renderAdminCodes(){
   const s = codeChangeState;
   return `
+  ${renderAdminAccountSection()}
   <div class="card">
-    <div class="section-title">Change Access Codes</div>
-    <div class="section-desc">To change either code, first verify your identity with the current admin code.</div>
+    <div class="section-title">Applicant Access Code</div>
+    <div class="section-desc">This is the shared code tutors use to book an interview slot. It isn't a login and doesn't need to be secret in the same way — anyone with the link and code can book.</div>
 
-    <div class="field">
-      <label>Current Admin Code (verification)</label>
-      <input type="password" id="authCodeInput" placeholder="Enter current admin code" value="${escapeHtml(s.authCode)}">
-    </div>
-    <div class="divider"></div>
     <div class="field">
       <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.applicantCode)})</span></label>
       <input type="text" id="newApplicantInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newApplicant)}">
-    </div>
-    <div class="field">
-      <label>New Admin Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.adminCode)})</span></label>
-      <input type="text" id="newAdminInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newAdmin)}">
     </div>
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
     ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
   </div>`;
 }
+
 
 function renderEditModal(){
   const b = editingBooking;
@@ -3483,12 +3540,7 @@ function attachHandlers(){
         if(!val){ gateError='Please enter a code.'; render(); return; }
         gateBusy = true; gateError=''; render();
         await loadBookings();
-        if(val === config.adminCode){
-          await loadApplications();
-          await loadAccountSignups();
-          await loadDeviceSubmissions();
-          view='admin'; gateBusy=false; render();
-        } else if(val === config.applicantCode){
+        if(val === config.applicantCode){
           view='book'; gateBusy=false; render();
         } else {
           gateBusy=false; gateError='That code is not valid.'; render();
@@ -3499,6 +3551,32 @@ function attachHandlers(){
       $('#gateCode').focus();
       const findLink = $('#gateSwitchToFind');
       if(findLink) findLink.onclick = () => { gateMode='find'; findError=''; render(); };
+      const adminLink = $('#gateSwitchToAdmin');
+      if(adminLink) adminLink.onclick = () => { gateMode='adminLogin'; adminLoginError=''; render(); };
+    } else if(gateMode==='adminLogin'){
+      const submit = async () => {
+        const email = $('#adminLoginEmailInput').value.trim();
+        const password = $('#adminLoginPasswordInput').value;
+        if(!email || !password){ adminLoginError='Please enter your email and password.'; render(); return; }
+        adminLoginBusy = true; adminLoginError=''; adminLoginEmail = email; render();
+        try{
+          await firebase.auth().signInWithEmailAndPassword(email, password);
+          // onAuthStateChanged (set up in init) picks up the signed-in user,
+          // loads admin data, and switches the view to 'admin'.
+        }catch(e){
+          adminLoginBusy = false;
+          adminLoginError = e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found'
+            ? 'Incorrect email or password.'
+            : 'Something went wrong signing in. Please try again.';
+          render();
+        }
+      };
+      $('#adminLoginSubmit').onclick = submit;
+      $('#adminLoginPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#adminLoginEmailInput').oninput = e => { adminLoginEmail = e.target.value; };
+      (adminLoginEmail ? $('#adminLoginPasswordInput') : $('#adminLoginEmailInput')).focus();
+      const backLink = $('#gateSwitchToCodeFromAdmin');
+      if(backLink) backLink.onclick = () => { gateMode='code'; adminLoginError=''; render(); };
     } else {
       const submit = async () => {
         const email = $('#findEmailInput').value.trim();
@@ -4424,25 +4502,53 @@ Langdy Team`;
     }
 
     if(adminTab==='codes'){
-      $('#authCodeInput').oninput = e => { codeChangeState.authCode = e.target.value; };
       $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
-      $('#newAdminInput').oninput = e => { codeChangeState.newAdmin = e.target.value; };
       $('#codeSaveBtn').onclick = async () => {
         const s = codeChangeState;
         s.error=''; s.success='';
-        if(s.authCode !== config.adminCode){
-          s.error = 'Current admin code does not match.'; render(); return;
-        }
-        if(!s.newApplicant.trim() && !s.newAdmin.trim()){
-          s.error = 'Enter at least one new code to change.'; render(); return;
+        if(!s.newApplicant.trim()){
+          s.error = 'Enter a new applicant code to change.'; render(); return;
         }
         s.busy = true; render();
-        const next = Object.assign({}, config);
-        if(s.newApplicant.trim()) next.applicantCode = s.newApplicant.trim();
-        if(s.newAdmin.trim()) next.adminCode = s.newAdmin.trim();
+        const next = Object.assign({}, config, { applicantCode: s.newApplicant.trim() });
         await saveConfig(next);
-        s.busy=false; s.success='Codes updated successfully.'; s.authCode=''; s.newApplicant=''; s.newAdmin='';
+        s.busy=false; s.success='Applicant code updated successfully.'; s.newApplicant='';
         render();
+      };
+
+      $('#cpCurrentInput').oninput = e => { changePasswordState.currentPassword = e.target.value; };
+      $('#cpNewInput').oninput = e => { changePasswordState.newPassword = e.target.value; };
+      $('#cpConfirmInput').oninput = e => { changePasswordState.confirmPassword = e.target.value; };
+      $('#changePasswordBtn').onclick = async () => {
+        const p = changePasswordState;
+        p.error=''; p.success='';
+        if(!p.currentPassword || !p.newPassword || !p.confirmPassword){
+          p.error = 'Please fill in all three password fields.'; render(); return;
+        }
+        if(p.newPassword.length < 6){
+          p.error = 'New password must be at least 6 characters.'; render(); return;
+        }
+        if(p.newPassword !== p.confirmPassword){
+          p.error = 'New password and confirmation do not match.'; render(); return;
+        }
+        p.busy = true; render();
+        try{
+          const user = currentAdminUser;
+          const credential = firebase.auth.EmailAuthProvider.credential(user.email, p.currentPassword);
+          await user.reauthenticateWithCredential(credential);
+          await user.updatePassword(p.newPassword);
+          p.busy=false; p.success='Password changed successfully.'; p.currentPassword=''; p.newPassword=''; p.confirmPassword='';
+          render();
+        }catch(e){
+          p.busy=false;
+          p.error = (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential')
+            ? 'Your current password is incorrect.'
+            : 'Something went wrong changing your password. Please try again.';
+          render();
+        }
+      };
+      $('#adminLogoutBtn').onclick = async () => {
+        await firebase.auth().signOut();
       };
     }
 
@@ -4572,6 +4678,25 @@ Langdy Team`;
   else if(params.has('signup')) view = 'signupForm';
   else if(params.has('device')) view = 'deviceForm';
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
+
+  // Firebase persists the signed-in admin across reloads by default, so this
+  // fires immediately on page load if they're already signed in from before,
+  // and again any time they sign in or out.
+  firebase.auth().onAuthStateChanged(async (user) => {
+    currentAdminUser = user;
+    if(user){
+      adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+      if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
+        await loadAllAdminData();
+        view = 'admin';
+      }
+    } else {
+      adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+      if(view === 'admin') view = 'gate';
+    }
+    render();
+  });
+
   render();
 })();
 </script>
