@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -4681,21 +4682,27 @@ Langdy Team`;
 
   // Firebase persists the signed-in admin across reloads by default, so this
   // fires immediately on page load if they're already signed in from before,
-  // and again any time they sign in or out.
-  firebase.auth().onAuthStateChanged(async (user) => {
-    currentAdminUser = user;
-    if(user){
-      adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
-      if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
-        await loadAllAdminData();
-        view = 'admin';
+  // and again any time they sign in or out. Wrapped in try/catch so that if
+  // Auth ever fails to initialize, the rest of the app still renders instead
+  // of the page going blank.
+  try{
+    firebase.auth().onAuthStateChanged(async (user) => {
+      currentAdminUser = user;
+      if(user){
+        adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+        if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
+          await loadAllAdminData();
+          view = 'admin';
+        }
+      } else {
+        adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+        if(view === 'admin') view = 'gate';
       }
-    } else {
-      adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
-      if(view === 'admin') view = 'gate';
-    }
-    render();
-  });
+      render();
+    });
+  }catch(e){
+    console.error('Firebase Auth failed to initialize:', e);
+  }
 
   render();
 })();
