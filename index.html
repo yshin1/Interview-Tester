@@ -3058,12 +3058,8 @@ function renderFormBuilder(formKey){
       </div>` : ''}
       ${field.type==='image' ? `
       <div style="margin-top:8px; margin-left:36px;">
-        <label style="font-size:12px; color:var(--slate-light); display:block; margin-bottom:4px;">Which image to show</label>
-        <select data-fb-imagekey="${i}" style="padding:8px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
-          ${Object.keys(FORM_REFERENCE_IMAGES).map(k=>`<option value="${k}" ${(field.imageKey||'backupInternet')===k?'selected':''}>${FORM_REFERENCE_IMAGE_LABELS[k]||k}</option>`).join('')}
-          ${Object.entries(customFormImages).map(([k,v])=>`<option value="${k}" ${field.imageKey===k?'selected':''}>${escapeHtml(v.label||'Uploaded image')}</option>`).join('')}
-        </select>
-        <div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
+        <label style="font-size:12px; color:var(--slate-light); display:block; margin-bottom:4px;">Reference image</label>
+        <div style="display:flex; align-items:center; gap:8px;">
           <input type="file" accept="image/*" data-fb-imageupload="${i}" style="font-size:12px;">
           <span data-fb-imageupload-status="${i}" style="font-size:11.5px; color:var(--slate-light);"></span>
         </div>
@@ -4282,14 +4278,6 @@ Langdy Team`;
           formBuilderSavedFlash[formKey] = false;
         };
         el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
-      });
-      $$('[data-fb-imagekey]').forEach(el=>{
-        el.onchange = () => {
-          const i = Number(el.dataset.fbImagekey);
-          draft[i].imageKey = el.value;
-          formBuilderSavedFlash[formKey] = false;
-          render();
-        };
       });
       $$('[data-fb-imageupload]').forEach(el=>{
         el.onchange = async () => {
