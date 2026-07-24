@@ -352,10 +352,11 @@ async function deleteFormImage(id){
   delete customFormImages[id];
 }
 
-// Admin-editable question sets for the Apply and Device forms. Falls back to
-// the built-in defaults (defined further below) until an admin customizes
-// them, at which point the customized version is what everyone sees.
-let formSchemas = { apply: null, device: null };
+// Admin-editable question sets for the Apply, Device, and Account Signup
+// forms. Falls back to the built-in defaults (defined further below) until
+// an admin customizes them, at which point the customized version is what
+// everyone sees.
+let formSchemas = { apply: null, device: null, signup: null };
 
 // One-time-per-load migration: if a field's label has multiple lines (from
 // before "description" existed as its own thing), split it so the first
@@ -376,16 +377,19 @@ async function loadFormSchemas(){
     const parsed = (res && res.value) ? JSON.parse(res.value) : {};
     formSchemas.apply = Array.isArray(parsed.apply) && parsed.apply.length ? parsed.apply : APPLY_FORM_DEFAULT_SCHEMA;
     formSchemas.device = Array.isArray(parsed.device) && parsed.device.length ? parsed.device : DEVICE_FORM_DEFAULT_SCHEMA;
+    formSchemas.signup = Array.isArray(parsed.signup) && parsed.signup.length ? parsed.signup : SIGNUP_FORM_DEFAULT_SCHEMA;
   }catch(e){
     formSchemas.apply = APPLY_FORM_DEFAULT_SCHEMA;
     formSchemas.device = DEVICE_FORM_DEFAULT_SCHEMA;
+    formSchemas.signup = SIGNUP_FORM_DEFAULT_SCHEMA;
   }
   formSchemas.apply = migrateSchemaFieldDescriptions(formSchemas.apply);
   formSchemas.device = migrateSchemaFieldDescriptions(formSchemas.device);
+  formSchemas.signup = migrateSchemaFieldDescriptions(formSchemas.signup);
   return formSchemas;
 }
 async function saveFormSchemas(){
-  await storage.set(FORM_SCHEMAS_KEY, JSON.stringify({ apply: formSchemas.apply, device: formSchemas.device }));
+  await storage.set(FORM_SCHEMAS_KEY, JSON.stringify({ apply: formSchemas.apply, device: formSchemas.device, signup: formSchemas.signup }));
 }
 
 /* ------------------------------------------------------------
@@ -661,6 +665,41 @@ const DEVICE_FORM_DEFAULT_SCHEMA = [
   {id:'section_noise', type:'section', label:'Noise-Canceling'},
   {id:'headsetModel', type:'text', label:'What brand and model of noise-canceling headset with a mic are you currently using?'},
   {id:'noiseCancelSoftware', type:'text', label:'What kind of noise-cancelling software are you currently using?'}
+];
+
+const SIGNUP_FORM_DEFAULT_SCHEMA = [
+  {id:'section_basic', type:'section', label:'Basic Information'},
+  {id:'tutorName', type:'text', label:'Enter your Langdy tutor name.'},
+  {id:'govId', type:'file', label:'Submit a copy of your government-issued ID (e.g. passport, national identity card) as an image file.'},
+  {id:'email', type:'text', label:'Enter your email address.'},
+  {id:'residence', type:'text', label:'Enter your current city and country of residence.'},
+  {id:'section_kakao', type:'section', label:'KakaoTalk'},
+  {id:'kakaoId', type:'text', label:'Enter your KakaoTalk ID.'},
+  {id:'kakaoScreenshot', type:'file', label:'For confirmation, upload a screenshot of the screen showing your KakaoTalk ID.'},
+  {id:'section_profile', type:'section', label:'Profile & Self-Introduction'},
+  {id:'profilePic', type:'file', label:'Upload your profile picture.'},
+  {id:'selfIntroText', type:'text', label:'Write a self-introduction.'},
+  {id:'selfIntroRecording', type:'file', label:'Record a self-introduction and upload the recording.'},
+  {id:'facebookLink', type:'text', label:'Provide the link to your active Facebook profile.'},
+  {id:'section_introReview', type:'section', label:'Self-Introduction Review'},
+  {id:'qMentionedHobbies', type:'yesno', label:'Did you mention your hobbies?'},
+  {id:'qAvoidedPersonalDetails', type:'yesno', label:'Did you avoid specifying your place of birth, residence, and duration of teaching experience?'},
+  {id:'qRecordingMp3', type:'yesno', label:'Is the recording in MP3 format?'},
+  {id:'qRecordingDuration', type:'yesno', label:'Is the recording 15–20 seconds long?'},
+  {id:'qVoiceClear', type:'yesno', label:'Is your voice clear in the recording, without any echo or background noise?'},
+  {id:'section_picReview', type:'section', label:'Profile Picture Review'},
+  {id:'qPicCasual', type:'yesno', label:'Is your profile picture a casual photo, such as a selfie?'},
+  {id:'qPicNotFormal', type:'yesno', label:'Is your profile picture free of formal elements, such as an ID photo style?'},
+  {id:'qPicHighQuality', type:'yesno', label:'Is your profile picture of high quality and easy to recognize?'},
+  {id:'qPicNoHeadset', type:'yesno', label:'Is your profile picture free of headsets or similar devices?'},
+  {id:'section_appSetup', type:'section', label:'App Setup'},
+  {id:'qKakaoNameMatches', type:'yesno', label:'Does your KakaoTalk profile name match your tutor name?', description:"Check if the name displayed on your KakaoTalk profile matches your tutor name. If it's different, please change the name on your profile to match your tutor name."},
+  {id:'qKakaoInstalledBoth', type:'yesno', label:'Did you install KakaoTalk on both your phone and PC?', description:'Install KakaoTalk on BOTH your phone and PC, and enable notifications on each.'},
+  {id:'qKakaoNotifEnabled', type:'yesno', label:'Did you enable KakaoTalk notifications?'},
+  {id:'qLangdyInstalled', type:'yesno', label:'Did you install the Langdy app on your phone?', description:"Install the Langdy app on your phone and enable app notifications. Note: you won't be able to sign in until the admin completes your registration."},
+  {id:'qLangdyNotifEnabled', type:'yesno', label:'Did you enable Langdy app notifications?'},
+  {id:'noticeContactAdmin', type:'notice', label:'Please inform the admin via KakaoTalk once you have submitted this form. After reviewing your response, the admin will contact you via KakaoTalk during operating hours with preparatory instructions before the orientation.'},
+  {id:'agree', type:'checkbox', label:'I certify that the information provided above is true to the best of my knowledge and belief. I understand that I will be subject to disciplinary action if any of the above information is found to be false.'}
 ];
 
 const SLOTS = [
@@ -1517,6 +1556,10 @@ function renderDynamicField(formKey, field, value, fileName){
       return `<div class="field">${labelBlock}<div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
     case 'image':
       return `<div class="field">${labelBlock}<img src="${resolveFieldImageSrc(field.imageKey)}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
+    case 'checkbox':
+      return `<div class="apply-section"><label class="checkbox-item" style="cursor:pointer; margin-top:10px;"><input type="checkbox" id="${idAttr}" ${value?'checked':''}> <span style="white-space:pre-wrap;">${escapeHtml(field.label)}</span></label></div>`;
+    case 'notice':
+      return `<div class="warn-box strong"><div class="icon">💬</div><div class="txt" style="white-space:pre-wrap;">${escapeHtml(field.label)}</div></div>`;
     default:
       return '';
   }
@@ -1527,7 +1570,8 @@ function renderDynamicForm(formKey, schema, state){
 
 let dynamicFormState = {
   apply: { answers:{}, files:{}, error:'', busy:false, done:false },
-  device: { answers:{}, files:{}, error:'', busy:false, done:false }
+  device: { answers:{}, files:{}, error:'', busy:false, done:false },
+  signup: { answers:{}, files:{}, error:'', busy:false, done:false }
 };
 
 function findNameForDone(schema, answers){
@@ -1570,117 +1614,30 @@ function renderApplyDone(){
    Account Signup (Account Creation) form
    ============================================================ */
 function renderSignupFormPage(){
-  if(signupForm.done) return renderSignupFormDone();
-  const f = signupForm;
-  const yesNo = (id, val) => `
-    <select id="${id}">
-      <option value="" ${val===''?'selected':''}>Select…</option>
-      <option value="Yes" ${val==='Yes'?'selected':''}>Yes</option>
-      <option value="No" ${val==='No'?'selected':''}>No</option>
-    </select>`;
-  const fileDrop = (id, label, currentName) => `
-    <div class="file-drop">
-      ${label}
-      <input type="file" id="${id}">
-      ${currentName ? `<div class="fname">Selected: ${escapeHtml(currentName)}</div>` : ''}
-    </div>`;
-
+  const state = dynamicFormState.signup;
+  if(state.done) return renderSignupFormDone();
+  const schema = formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA;
   return `
   <div class="apply-wrap">
     <div class="card">
       <h1 class="gate-title">Account Signup</h1>
       <p class="gate-sub">Please complete this form to finish creating your Langdy tutor account.</p>
-
-      <div class="apply-section">
-        <div class="apply-section-title">Basic Information</div>
-        <div class="field"><label>Enter your Langdy tutor name.</label><input type="text" id="sf_tutorName" value="${escapeHtml(f.tutorName)}"></div>
-        <div class="field">
-          <label>Submit a copy of your government-issued ID (e.g. passport, national identity card) as an image file.</label>
-          ${fileDrop('sf_govId', 'Upload an image file', f.govIdFileName)}
-        </div>
-        <div class="field"><label>Enter your email address.</label><input type="email" id="sf_email" value="${escapeHtml(f.email)}"></div>
-        <div class="field"><label>Enter your current city and country of residence.</label><input type="text" id="sf_residence" value="${escapeHtml(f.residence)}"></div>
-      </div>
-
-      <div class="apply-section">
-        <div class="apply-section-title">KakaoTalk</div>
-        <div class="field"><label>Enter your KakaoTalk ID.</label><input type="text" id="sf_kakaoId" value="${escapeHtml(f.kakaoId)}"></div>
-        <div class="field">
-          <label>For confirmation, upload a screenshot of the screen showing your KakaoTalk ID.</label>
-          ${fileDrop('sf_kakaoScreenshot', 'Upload an image file', f.kakaoScreenshotFileName)}
-        </div>
-      </div>
-
-      <div class="apply-section">
-        <div class="apply-section-title">Profile &amp; Self-Introduction</div>
-        <div class="field">
-          <label>Upload your profile picture.</label>
-          ${fileDrop('sf_profilePic', 'Upload an image file', f.profilePicFileName)}
-        </div>
-        <div class="field"><label>Write a self-introduction.</label><textarea id="sf_selfIntroText">${escapeHtml(f.selfIntroText)}</textarea></div>
-        <div class="field">
-          <label>Record a self-introduction and upload the recording.</label>
-          ${fileDrop('sf_selfIntroRecording', 'Upload an MP3 file', f.selfIntroRecordingFileName)}
-        </div>
-        <div class="field"><label>Provide the link to your active Facebook profile.</label><input type="text" id="sf_facebookLink" value="${escapeHtml(f.facebookLink)}"></div>
-      </div>
-
-      <div class="apply-section">
-        <div class="apply-section-title">Self-Introduction Review</div>
-        <div class="field"><label>Did you mention your hobbies?</label>${yesNo('sf_qMentionedHobbies', f.qMentionedHobbies)}</div>
-        <div class="field"><label>Did you avoid specifying your place of birth, residence, and duration of teaching experience?</label>${yesNo('sf_qAvoidedPersonalDetails', f.qAvoidedPersonalDetails)}</div>
-        <div class="field"><label>Is the recording in MP3 format?</label>${yesNo('sf_qRecordingMp3', f.qRecordingMp3)}</div>
-        <div class="field"><label>Is the recording 15–20 seconds long?</label>${yesNo('sf_qRecordingDuration', f.qRecordingDuration)}</div>
-        <div class="field"><label>Is your voice clear in the recording, without any echo or background noise?</label>${yesNo('sf_qVoiceClear', f.qVoiceClear)}</div>
-      </div>
-
-      <div class="apply-section">
-        <div class="apply-section-title">Profile Picture Review</div>
-        <div class="field"><label>Is your profile picture a casual photo, such as a selfie?</label>${yesNo('sf_qPicCasual', f.qPicCasual)}</div>
-        <div class="field"><label>Is your profile picture free of formal elements, such as an ID photo style?</label>${yesNo('sf_qPicNotFormal', f.qPicNotFormal)}</div>
-        <div class="field"><label>Is your profile picture of high quality and easy to recognize?</label>${yesNo('sf_qPicHighQuality', f.qPicHighQuality)}</div>
-        <div class="field"><label>Is your profile picture free of headsets or similar devices?</label>${yesNo('sf_qPicNoHeadset', f.qPicNoHeadset)}</div>
-      </div>
-
-      <div class="apply-section">
-        <div class="apply-section-title">App Setup</div>
-        <p class="section-desc">Check if the name displayed on your KakaoTalk profile matches your tutor name. If it's different, please change the name on your profile to match your tutor name.</p>
-        <div class="field"><label>Does your KakaoTalk profile name match your tutor name?</label>${yesNo('sf_qKakaoNameMatches', f.qKakaoNameMatches)}</div>
-
-        <p class="section-desc">Install KakaoTalk on BOTH your phone and PC, and enable notifications on each.</p>
-        <div class="field"><label>Did you install KakaoTalk on both your phone and PC?</label>${yesNo('sf_qKakaoInstalledBoth', f.qKakaoInstalledBoth)}</div>
-        <div class="field"><label>Did you enable KakaoTalk notifications?</label>${yesNo('sf_qKakaoNotifEnabled', f.qKakaoNotifEnabled)}</div>
-
-        <p class="section-desc">Install the Langdy app on your phone and enable app notifications. Note: you won't be able to sign in until the admin completes your registration.</p>
-        <div class="field"><label>Did you install the Langdy app on your phone?</label>${yesNo('sf_qLangdyInstalled', f.qLangdyInstalled)}</div>
-        <div class="field"><label>Did you enable Langdy app notifications?</label>${yesNo('sf_qLangdyNotifEnabled', f.qLangdyNotifEnabled)}</div>
-      </div>
-
-      <div class="warn-box strong">
-        <div class="icon">💬</div>
-        <div class="txt">Please inform the admin via KakaoTalk once you have submitted this form. After reviewing your response, the admin will contact you via KakaoTalk during operating hours with preparatory instructions before the orientation.</div>
-      </div>
-
-      <div class="apply-section">
-        <label class="checkbox-item" style="cursor:pointer; margin-top:10px;">
-          <input type="checkbox" id="sf_agree" ${f.agree?'checked':''}>
-          I certify that the information provided above is true to the best of my knowledge and belief. I understand that I will be subject to disciplinary action if any of the above information is found to be false.
-        </label>
-      </div>
-
-      ${f.error ? `<div class="error-text">${escapeHtml(f.error)}</div>` : ''}
-      <button class="btn btn-gold" id="signupSubmitBtn" ${f.busy?'disabled':''}>${f.busy?'Submitting…':'Submit'}</button>
+      ${renderDynamicForm('signup', schema, state)}
+      ${state.error ? `<div class="error-text">${escapeHtml(state.error)}</div>` : ''}
+      <button class="btn btn-gold" id="signupSubmitBtn" ${state.busy?'disabled':''}>${state.busy?'Submitting…':'Submit'}</button>
     </div>
   </div>`;
 }
 
 function renderSignupFormDone(){
+  const state = dynamicFormState.signup;
+  const name = findNameForDone(formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA, state.answers);
   return `
   <div class="apply-wrap">
     <div class="card">
       <div class="ticket">
         <div class="ticket-eyebrow">Submission Received</div>
-        <div class="ticket-name">Thank you, ${escapeHtml(signupForm.tutorName)}!</div>
+        <div class="ticket-name">Thank you, ${escapeHtml(name)}!</div>
         <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:6px 0 0;">We've received your account signup submission. Please message the admin on KakaoTalk to let them know you've submitted — they'll follow up with next steps.</p>
       </div>
     </div>
@@ -1915,7 +1872,8 @@ const TAB_GROUPS = [
   { label: 'Chat', tab: 'chats' },
   { label: 'Forms', children: [
       ['formBuilderApply','Apply Form'],
-      ['formBuilderDevice','Device Form']
+      ['formBuilderDevice','Device Form'],
+      ['formBuilderSignup','Account Signup Form']
     ]
   },
   { label: 'Access Codes', tab: 'codes' }
@@ -1953,6 +1911,7 @@ function renderAdmin(){
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
   else if(adminTab==='formBuilderDevice') body = renderFormBuilder('device');
+  else if(adminTab==='formBuilderSignup') body = renderFormBuilder('signup');
   else if(adminTab==='codes') body = renderAdminCodes();
 
   return `
@@ -2270,6 +2229,32 @@ function renderDeleteApplicationModal(){
 }
 
 let accountSignupDetailTarget = null;
+
+// Auto-translates a self-introduction to Korean using Google's public
+// (unofficial, keyless) translate endpoint — no server or API key needed,
+// but it's an unsupported endpoint so treat failures as non-fatal.
+let selfIntroTranslations = {}; // signupId -> { status: 'loading'|'done'|'error', text }
+function looksAlreadyKorean(text){
+  const hangul = (text.match(/[\uac00-\ud7a3]/g) || []).length;
+  const meaningful = (text.replace(/\s/g, '') || '').length || 1;
+  return (hangul / meaningful) > 0.2;
+}
+async function translateSelfIntroToKorean(signupId, text){
+  if(!text || !text.trim()) return;
+  selfIntroTranslations[signupId] = { status: 'loading', text: '' };
+  render();
+  try{
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=ko&dt=t&q=' + encodeURIComponent(text);
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('translate request failed');
+    const data = await res.json();
+    const translated = (data[0] || []).map(chunk => chunk[0]).join('');
+    selfIntroTranslations[signupId] = { status: 'done', text: translated };
+  }catch(e){
+    selfIntroTranslations[signupId] = { status: 'error', text: '' };
+  }
+  render();
+}
 let deleteAccountSignupTarget = null;
 
 function renderAdminAccountSignups(){
@@ -2316,7 +2301,19 @@ function renderAccountSignupDetailModal(){
       ${row('KakaoTalk ID', s.kakaoId)}
       ${linkRow('KakaoTalk screenshot', s.kakaoScreenshotUrl)}
       ${linkRow('Profile picture', s.profilePicUrl)}
-      ${row('Self-introduction', s.selfIntroText)}
+      ${s.selfIntroText ? `
+      <div class="field">
+        <label>Self-introduction</label>
+        <div style="white-space:pre-wrap; font-size:13.5px; line-height:1.6; margin-top:4px;">${escapeHtml(s.selfIntroText)}</div>
+      </div>
+      ${(() => {
+        const t = selfIntroTranslations[s.id];
+        if(!t) return '';
+        if(t.status === 'loading') return `<div class="field"><label>Korean translation</label><div style="font-size:12.5px; color:var(--slate-light); margin-top:4px;">Translating…</div></div>`;
+        if(t.status === 'error') return `<div class="field"><label>Korean translation</label><div style="font-size:12.5px; color:var(--slate-light); margin-top:4px;">Translation unavailable right now.</div></div>`;
+        return `<div class="field"><label>Korean translation</label><div style="white-space:pre-wrap; font-size:13px; line-height:1.6; color:var(--slate); background:#F7F5F0; padding:10px 12px; border-radius:8px; margin-top:4px;">${escapeHtml(t.text)}</div></div>`;
+      })()}
+      ` : row('Self-introduction', s.selfIntroText)}
       ${s.selfIntroRecordingUrl ? `<div class="field"><label>Self-introduction recording</label><audio controls src="${escapeHtml(s.selfIntroRecordingUrl)}" style="width:100%;"></audio></div>` : ''}
       ${row('Facebook', s.facebookLink)}
       <div class="divider"></div>
@@ -2998,12 +2995,18 @@ function renderAdminCapacity(){
   </div>`;
 }
 
-let formBuilderDraft = { apply: null, device: null };
-let formBuilderSavedFlash = { apply: false, device: false };
+let formBuilderDraft = { apply: null, device: null, signup: null };
+let formBuilderSavedFlash = { apply: false, device: false, signup: false };
+
+function getDefaultSchemaFor(formKey){
+  if(formKey==='apply') return APPLY_FORM_DEFAULT_SCHEMA;
+  if(formKey==='device') return DEVICE_FORM_DEFAULT_SCHEMA;
+  return SIGNUP_FORM_DEFAULT_SCHEMA;
+}
 
 function getFormBuilderDraft(formKey){
   if(!formBuilderDraft[formKey]){
-    const base = formSchemas[formKey] || (formKey==='apply' ? APPLY_FORM_DEFAULT_SCHEMA : DEVICE_FORM_DEFAULT_SCHEMA);
+    const base = formSchemas[formKey] || getDefaultSchemaFor(formKey);
     const normalizedTypes = JSON.parse(JSON.stringify(base)).map(f => f.type==='textarea' ? Object.assign({}, f, {type:'text'}) : f);
     formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(normalizedTypes);
   }
@@ -3016,10 +3019,12 @@ const FIELD_TYPE_LABELS = {
   select: 'Dropdown',
   yesno: 'Yes / No',
   file: 'File upload',
-  image: 'Reference image'
+  image: 'Reference image',
+  checkbox: 'Checkbox',
+  notice: 'Notice box'
 };
 
-let formBuilderPreviewOpen = { apply: false, device: false };
+let formBuilderPreviewOpen = { apply: false, device: false, signup: false };
 
 function renderFormPreview(formKey, schema){
   const previewState = { answers:{}, files:{} };
@@ -3034,7 +3039,7 @@ function renderFormPreview(formKey, schema){
 
 function renderFormBuilder(formKey){
   const draft = getFormBuilderDraft(formKey);
-  const formLabel = formKey==='apply' ? 'Apply' : 'Device Submission';
+  const formLabel = formKey==='apply' ? 'Apply' : formKey==='device' ? 'Device Submission' : 'Account Signup';
 
   const rows = draft.map((field, i) => `
     <div class="card" style="margin-bottom:10px; padding:14px;">
@@ -3083,6 +3088,8 @@ function renderFormBuilder(formKey){
         <option value="yesno">Yes / No</option>
         <option value="file">File upload</option>
         <option value="section">Section header</option>
+        <option value="checkbox">Checkbox</option>
+        <option value="notice">Notice box</option>
       </select>
       <button class="btn btn-ghost btn-sm" id="fbAddFieldBtn" style="width:auto; padding:9px 16px;">+ Add field</button>
     </div>
@@ -3279,101 +3286,67 @@ function attachHandlers(){
     };
   }
 
-  if(view==='signupForm' && !signupForm.done){
-    const f = signupForm;
-    const bindText = (id, key) => { const el = $(id); if(el) el.oninput = e => { f[key] = e.target.value; }; };
-    bindText('#sf_tutorName','tutorName');
-    bindText('#sf_email','email');
-    bindText('#sf_residence','residence');
-    bindText('#sf_kakaoId','kakaoId');
-    bindText('#sf_selfIntroText','selfIntroText');
-    bindText('#sf_facebookLink','facebookLink');
-
-    const bindSelect = (id, key) => { const el = $(id); if(el) el.onchange = e => { f[key] = e.target.value; }; };
-    bindSelect('#sf_qMentionedHobbies','qMentionedHobbies');
-    bindSelect('#sf_qAvoidedPersonalDetails','qAvoidedPersonalDetails');
-    bindSelect('#sf_qRecordingMp3','qRecordingMp3');
-    bindSelect('#sf_qRecordingDuration','qRecordingDuration');
-    bindSelect('#sf_qVoiceClear','qVoiceClear');
-    bindSelect('#sf_qPicCasual','qPicCasual');
-    bindSelect('#sf_qPicNotFormal','qPicNotFormal');
-    bindSelect('#sf_qPicHighQuality','qPicHighQuality');
-    bindSelect('#sf_qPicNoHeadset','qPicNoHeadset');
-    bindSelect('#sf_qKakaoNameMatches','qKakaoNameMatches');
-    bindSelect('#sf_qKakaoInstalledBoth','qKakaoInstalledBoth');
-    bindSelect('#sf_qKakaoNotifEnabled','qKakaoNotifEnabled');
-    bindSelect('#sf_qLangdyInstalled','qLangdyInstalled');
-    bindSelect('#sf_qLangdyNotifEnabled','qLangdyNotifEnabled');
-
-    const bindFile = (id, fileKey, nameKey) => {
-      const el = $(id);
-      if(el) el.onchange = e => {
-        const file = e.target.files[0];
-        f[fileKey] = file || null;
-        f[nameKey] = file ? file.name : '';
-        render();
-      };
-    };
-    bindFile('#sf_govId','govIdFile','govIdFileName');
-    bindFile('#sf_kakaoScreenshot','kakaoScreenshotFile','kakaoScreenshotFileName');
-    bindFile('#sf_profilePic','profilePicFile','profilePicFileName');
-    bindFile('#sf_selfIntroRecording','selfIntroRecordingFile','selfIntroRecordingFileName');
-
-    const agreeEl = $('#sf_agree');
-    if(agreeEl) agreeEl.onchange = e => { f.agree = e.target.checked; };
-
+  if(view==='signupForm' && !dynamicFormState.signup.done){
+    const formKey = 'signup';
+    const state = dynamicFormState[formKey];
+    const schema = formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA;
+    schema.forEach(field => {
+      if(field.type === 'section' || field.type === 'image' || field.type === 'notice') return;
+      const el = $(`#df_${formKey}_${field.id}`);
+      if(!el) return;
+      if(field.type === 'file'){
+        el.onchange = e => {
+          const file = e.target.files[0];
+          state.files[field.id] = file || null;
+          state.files[field.id+'Name'] = file ? file.name : '';
+          render();
+        };
+      } else if(field.type === 'checkbox'){
+        el.onchange = e => { state.answers[field.id] = e.target.checked; };
+      } else if(field.type === 'select' || field.type === 'yesno'){
+        el.onchange = e => { state.answers[field.id] = e.target.value; };
+      } else {
+        el.oninput = e => { state.answers[field.id] = e.target.value; };
+      }
+    });
     const submitBtn = $('#signupSubmitBtn');
     if(submitBtn) submitBtn.onclick = async () => {
-      f.error = '';
-      if(!f.tutorName.trim() || !f.email.trim()){
-        f.error = 'Please fill in at least your tutor name and email.'; render(); return;
+      state.error = '';
+      const nameField = schema.find(f=>f.id==='tutorName');
+      const emailField = schema.find(f=>f.id==='email');
+      if(nameField && !(state.answers[nameField.id]||'').trim()){
+        state.error = 'Please fill in at least your tutor name.'; render(); return;
       }
-      if(!f.agree){
-        f.error = 'Please check the certification box before submitting.'; render(); return;
+      if(emailField && !(state.answers[emailField.id]||'').trim()){
+        state.error = 'Please fill in your email.'; render(); return;
       }
-      f.busy = true; render();
+      const checkboxFields = schema.filter(f=>f.type==='checkbox');
+      const uncheckedRequired = checkboxFields.find(f => !state.answers[f.id]);
+      if(uncheckedRequired){
+        state.error = 'Please check the certification box before submitting.'; render(); return;
+      }
+      state.busy = true; render();
       try{
         const signupId = 'signup_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-        let govIdUrl = '', kakaoScreenshotUrl = '', profilePicUrl = '', selfIntroRecordingUrl = '';
-        if(f.govIdFile) govIdUrl = await uploadEntityFile(f.govIdFile, 'accountSignups', signupId, 'govId');
-        if(f.kakaoScreenshotFile) kakaoScreenshotUrl = await uploadEntityFile(f.kakaoScreenshotFile, 'accountSignups', signupId, 'kakaoScreenshot');
-        if(f.profilePicFile) profilePicUrl = await uploadEntityFile(f.profilePicFile, 'accountSignups', signupId, 'profilePic');
-        if(f.selfIntroRecordingFile) selfIntroRecordingUrl = await uploadEntityFile(f.selfIntroRecordingFile, 'accountSignups', signupId, 'selfIntroRecording');
-        const record = {
-          id: signupId,
-          tutorName: f.tutorName.trim(),
-          govIdUrl,
-          email: f.email.trim(),
-          residence: f.residence.trim(),
-          kakaoId: f.kakaoId.trim(),
-          kakaoScreenshotUrl,
-          profilePicUrl,
-          selfIntroText: f.selfIntroText.trim(),
-          selfIntroRecordingUrl,
-          facebookLink: f.facebookLink.trim(),
-          qMentionedHobbies: f.qMentionedHobbies,
-          qAvoidedPersonalDetails: f.qAvoidedPersonalDetails,
-          qRecordingMp3: f.qRecordingMp3,
-          qRecordingDuration: f.qRecordingDuration,
-          qVoiceClear: f.qVoiceClear,
-          qPicCasual: f.qPicCasual,
-          qPicNotFormal: f.qPicNotFormal,
-          qPicHighQuality: f.qPicHighQuality,
-          qPicNoHeadset: f.qPicNoHeadset,
-          qKakaoNameMatches: f.qKakaoNameMatches,
-          qKakaoInstalledBoth: f.qKakaoInstalledBoth,
-          qKakaoNotifEnabled: f.qKakaoNotifEnabled,
-          qLangdyInstalled: f.qLangdyInstalled,
-          qLangdyNotifEnabled: f.qLangdyNotifEnabled,
-          submittedAt: new Date().toISOString(),
-          reviewed: false
-        };
+        const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false };
+        for(const field of schema){
+          if(field.type === 'section' || field.type === 'image' || field.type === 'notice') continue;
+          if(field.type === 'file'){
+            const file = state.files[field.id];
+            record[field.id+'Url'] = file ? await uploadEntityFile(file, 'accountSignups', signupId, field.id) : '';
+          } else if(field.type === 'checkbox'){
+            record[field.id] = !!state.answers[field.id];
+          } else {
+            const v = state.answers[field.id];
+            record[field.id] = typeof v === 'string' ? v.trim() : (v||'');
+          }
+        }
         await saveOneAccountSignup(record);
-        f.busy = false; f.done = true; render();
+        state.busy = false; state.done = true; render();
       }catch(e){
         console.error('SIGNUP SUBMIT ERROR:', e);
-        f.busy = false;
-        f.error = 'Something went wrong submitting this form. Please try again.'; render();
+        state.busy = false;
+        state.error = 'Something went wrong submitting this form. Please try again.'; render();
       }
     };
   }
@@ -3807,6 +3780,10 @@ Langdy Team`;
           await saveOneAccountSignup(updated);
           render();
         };
+        const s = accountSignups.find(x=>x.id===accountSignupDetailTarget);
+        if(s && s.selfIntroText && s.selfIntroText.trim() && !selfIntroTranslations[s.id] && !looksAlreadyKorean(s.selfIntroText)){
+          translateSelfIntroToKorean(s.id, s.selfIntroText);
+        }
       }
       if(deleteAccountSignupTarget){
         $('#deleteSignupNoBtn').onclick = () => { deleteAccountSignupTarget=null; render(); };
@@ -4242,8 +4219,8 @@ Langdy Team`;
       };
     }
 
-    if(adminTab==='formBuilderApply' || adminTab==='formBuilderDevice'){
-      const formKey = adminTab==='formBuilderApply' ? 'apply' : 'device';
+    if(adminTab==='formBuilderApply' || adminTab==='formBuilderDevice' || adminTab==='formBuilderSignup'){
+      const formKey = adminTab==='formBuilderApply' ? 'apply' : adminTab==='formBuilderDevice' ? 'device' : 'signup';
       const draft = getFormBuilderDraft(formKey);
 
       $$('[data-fb-type]').forEach(el=>{
@@ -4336,7 +4313,7 @@ Langdy Team`;
         render();
       };
       $('#fbResetBtn').onclick = () => {
-        const base = formKey==='apply' ? APPLY_FORM_DEFAULT_SCHEMA : DEVICE_FORM_DEFAULT_SCHEMA;
+        const base = getDefaultSchemaFor(formKey);
         formBuilderDraft[formKey] = JSON.parse(JSON.stringify(base));
         formBuilderSavedFlash[formKey] = false;
         render();
