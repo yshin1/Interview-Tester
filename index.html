@@ -2177,12 +2177,20 @@ function renderAdminApplications(){
 
 function renderApplicationDetailModal(){
   const a = applications.find(x => x.id === applicationDetailTarget) || {};
-  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const editText = (label, id, value, isTextarea) => isTextarea ? `
+    <div class="field"><label>${label}</label><textarea data-app-edit="${id}" style="min-height:90px;">${escapeHtml(value||'')}</textarea></div>`
+    : `<div class="field"><label>${label}</label><input type="text" data-app-edit="${id}" value="${escapeHtml(value||'')}"></div>`;
+  const editSelect = (label, id, value, options) => `
+    <div class="field"><label>${label}</label>
+      <select data-app-edit="${id}"><option value="">—</option>${options.map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
+    </div>`;
+  const editYesNo = (label, id, value) => editSelect(label, id, value, ['Yes','No']);
   const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
   return `
   <div class="modal-overlay" id="appDetailOverlay">
-    <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
+    <div class="modal" id="appDetailModalBody" style="max-width:520px; max-height:82vh; overflow:auto;">
       <h3>${escapeHtml(a.fullName)}</h3>
+      <p class="section-desc" style="margin-bottom:10px;">Edit any field below, then save. Uploaded files (image/recording) can be viewed but not replaced here.</p>
 
       <div class="field">
         <label>Score (0–10)</label>
@@ -2197,33 +2205,35 @@ function renderApplicationDetailModal(){
       </div>
       <div class="divider"></div>
 
-      ${row('Email', a.email)}
-      ${row('Reference', a.reference)}
-      ${row('Platform', a.platform)}
-      ${row('Worked at Langdy before', a.workedBefore)}
-      ${row('Interviewed before', a.interviewedBefore)}
-      ${row('Education', a.education)}
-      ${row('Certification', a.certification)}
+      ${editText('Full name', 'fullName', a.fullName)}
+      ${editText('Email', 'email', a.email)}
+      ${editText('Reference', 'reference', a.reference)}
+      ${editText('Platform', 'platform', a.platform)}
+      ${editYesNo('Worked at Langdy before', 'workedBefore', a.workedBefore)}
+      ${editYesNo('Interviewed before', 'interviewedBefore', a.interviewedBefore)}
+      ${editSelect('Education', 'education', a.education, EDUCATION_OPTIONS)}
+      ${editText('Certification', 'certification', a.certification)}
       ${linkRow('Verification image', a.verificationImageUrl)}
-      ${row('Weekdays 5:30–8:30 AM', a.weekdayMorning)}
-      ${row('Weekdays 17:00–23:00', a.weekdayEvening)}
-      ${row('Weekends (3+ hrs)', a.weekend)}
-      ${row('KakaoTalk ID', a.kakaoId)}
-      ${row('Teaching experience', a.teachingExperience)}
+      ${editYesNo('Weekdays 5:30–8:30 AM', 'weekdayMorning', a.weekdayMorning)}
+      ${editYesNo('Weekdays 17:00–23:00', 'weekdayEvening', a.weekdayEvening)}
+      ${editYesNo('Weekends (3+ hrs)', 'weekend', a.weekend)}
+      ${editText('KakaoTalk ID', 'kakaoId', a.kakaoId)}
+      ${editText('Teaching experience', 'teachingExperience', a.teachingExperience, true)}
       ${a.recordingUrl ? `
       <div class="field">
         <label>Voice Recording</label>
         <audio controls src="${escapeHtml(a.recordingUrl)}" style="width:100%;"></audio>
       </div>` : `<div class="ticket-row"><span class="k">Voice Recording</span><span class="v">—</span></div>`}
-      ${row('Internet type', a.internetType)}
-      ${row('Backup internet', a.backupInternet)}
-      ${row('Computer option', a.computerOption)}
-      ${row('Desktop backup power', a.desktopBackupPower)}
-      ${row('Laptop duration', a.laptopDuration)}
-      ${row('Laptop backup power', a.laptopBackupPower)}
-      ${row('Laptop backup duration', a.laptopBackupDuration)}
+      ${editSelect('Internet type', 'internetType', a.internetType, ['LAN','Fiber'])}
+      ${editSelect('Backup internet', 'backupInternet', a.backupInternet, BACKUP_INTERNET_OPTIONS)}
+      ${editSelect('Computer option', 'computerOption', a.computerOption, ['Desktop','Laptop','Both'])}
+      ${editSelect('Desktop backup power', 'desktopBackupPower', a.desktopBackupPower, APPLICATION_BACKUP_POWER_OPTIONS)}
+      ${editText('Laptop duration', 'laptopDuration', a.laptopDuration)}
+      ${editSelect('Laptop backup power', 'laptopBackupPower', a.laptopBackupPower, APPLICATION_BACKUP_POWER_OPTIONS)}
+      ${editText('Laptop backup duration', 'laptopBackupDuration', a.laptopBackupDuration)}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="appDetailCloseBtn">Close</button>
+        <button class="btn btn-primary" id="appDetailSaveBtn">Save Changes</button>
       </div>
     </div>
   </div>`;
@@ -2371,52 +2381,60 @@ function renderAdminDeviceSubmissions(){
 
 function renderDeviceSubmissionDetailModal(){
   const s = deviceSubmissions.find(x => x.id === deviceSubmissionDetailTarget) || {};
-  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const editText = (label, id, value) => `<div class="field"><label>${label}</label><input type="text" data-device-edit="${id}" value="${escapeHtml(value||'')}"></div>`;
+  const editSelect = (label, id, value, options) => `
+    <div class="field"><label>${label}</label>
+      <select data-device-edit="${id}"><option value="">—</option>${options.map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>
+    </div>`;
+  const editYesNo = (label, id, value) => editSelect(label, id, value, ['Yes','No']);
   const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
   return `
   <div class="modal-overlay" id="deviceDetailOverlay">
-    <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
+    <div class="modal" id="deviceDetailModalBody" style="max-width:520px; max-height:82vh; overflow:auto;">
       <h3>${escapeHtml(s.tutorName)}</h3>
+      <p class="section-desc" style="margin-bottom:10px;">Edit any field below, then save. Uploaded photos/screenshots can be viewed but not replaced here.</p>
+      ${editText('Tutor name', 'tutorName', s.tutorName)}
       <div class="section-title" style="font-size:13.5px;">Computer</div>
-      ${row('Computer option', s.computerOption)}
-      ${row('Laptop duration (unplugged)', s.laptopDuration)}
+      ${editSelect('Computer option', 'computerOption', s.computerOption, ['Desktop','Laptop','Both'])}
+      ${editText('Laptop duration (unplugged)', 'laptopDuration', s.laptopDuration)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Backup Power Source</div>
-      ${row('Has power station?', s.hasPowerStation)}
-      ${row('Backup power sources', (s.backupPowerSources||[]).join(', '))}
-      ${row('Backup power duration', s.backupPowerDuration)}
+      ${editYesNo('Has power station?', 'hasPowerStation', s.hasPowerStation)}
+      <div class="field"><label>Backup power sources (comma-separated)</label><input type="text" data-device-edit="backupPowerSourcesText" value="${escapeHtml((s.backupPowerSources||[]).join(', '))}"></div>
+      ${editText('Backup power duration', 'backupPowerDuration', s.backupPowerDuration)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Power Station</div>
-      ${row('Spec (number / capacity)', s.powerStationSpec)}
-      ${row('Connection method', s.powerStationConnection)}
+      ${editText('Spec (number / capacity)', 'powerStationSpec', s.powerStationSpec)}
+      ${editText('Connection method', 'powerStationConnection', s.powerStationConnection)}
       ${linkRow('Photo (laptop + power station)', s.powerStationPhotoUrl)}
-      ${row('Extra laptop duration w/ power station', s.laptopExtraDuration)}
+      ${editText('Extra laptop duration w/ power station', 'laptopExtraDuration', s.laptopExtraDuration)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Power Outage</div>
-      ${row('Outage frequency (per 3 months)', s.outageFrequency)}
-      ${row('Last outage', s.lastOutageDate)}
-      ${row('Last outage duration', s.lastOutageDuration)}
-      ${row('Backup method during outage', s.outageBackupMethod)}
+      ${editText('Outage frequency (per 3 months)', 'outageFrequency', s.outageFrequency)}
+      ${editText('Last outage', 'lastOutageDate', s.lastOutageDate)}
+      ${editText('Last outage duration', 'lastOutageDuration', s.lastOutageDuration)}
+      ${editText('Backup method during outage', 'outageBackupMethod', s.outageBackupMethod)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Main Internet</div>
-      ${row('Type', s.mainInternetType)}
-      ${row('Provider', s.mainInternetProvider)}
+      ${editSelect('Type', 'mainInternetType', s.mainInternetType, ['LAN','Fiber'])}
+      ${editText('Provider', 'mainInternetProvider', s.mainInternetProvider)}
       ${linkRow('Speedtest screenshot', s.mainInternetSpeedtestUrl)}
-      ${row('Upload speed', s.mainInternetUpload)}
-      ${row('Download speed', s.mainInternetDownload)}
+      ${editText('Upload speed', 'mainInternetUpload', s.mainInternetUpload)}
+      ${editText('Download speed', 'mainInternetDownload', s.mainInternetDownload)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Backup Internet</div>
-      ${row('Type', s.backupInternetType)}
-      ${row('Provider', s.backupInternetProvider)}
+      ${editSelect('Type', 'backupInternetType', s.backupInternetType, BACKUP_INTERNET_OPTIONS)}
+      ${editText('Provider', 'backupInternetProvider', s.backupInternetProvider)}
       ${linkRow('Speedtest screenshot', s.backupInternetSpeedtestUrl)}
-      ${row('Upload speed', s.backupInternetUpload)}
-      ${row('Download speed', s.backupInternetDownload)}
+      ${editText('Upload speed', 'backupInternetUpload', s.backupInternetUpload)}
+      ${editText('Download speed', 'backupInternetDownload', s.backupInternetDownload)}
       <div class="divider"></div>
       <div class="section-title" style="font-size:13.5px;">Noise-Canceling</div>
-      ${row('Headset model', s.headsetModel)}
-      ${row('Software', s.noiseCancelSoftware)}
+      ${editText('Headset model', 'headsetModel', s.headsetModel)}
+      ${editText('Software', 'noiseCancelSoftware', s.noiseCancelSoftware)}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deviceDetailCloseBtn">Close</button>
+        <button class="btn btn-primary" id="deviceDetailSaveBtn">Save Changes</button>
         <button class="btn btn-primary" id="deviceMarkReviewedBtn">${s.reviewed?'Mark as New':'Mark as Reviewed'}</button>
       </div>
     </div>
@@ -3768,6 +3786,18 @@ Langdy Team`;
           const a = applications.find(x=>x.id===applicationDetailTarget);
           saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
         };
+        const saveChangesBtn = $('#appDetailSaveBtn');
+        if(saveChangesBtn) saveChangesBtn.onclick = async () => {
+          const modalBody = document.getElementById('appDetailModalBody');
+          const prevScrollTop = modalBody ? modalBody.scrollTop : 0;
+          const patch = {};
+          document.querySelectorAll('[data-app-edit]').forEach(el => {
+            patch[el.dataset.appEdit] = el.value;
+          });
+          await saveAppField(patch);
+          const modalBodyAfter = document.getElementById('appDetailModalBody');
+          if(modalBodyAfter) modalBodyAfter.scrollTop = prevScrollTop;
+        };
       }
 
       if(deleteApplicationTarget){
@@ -3829,6 +3859,26 @@ Langdy Team`;
           const updated = Object.assign({}, s, { reviewed: !s.reviewed });
           await saveOneDeviceSubmission(updated);
           render();
+        };
+        $('#deviceDetailSaveBtn').onclick = async () => {
+          const modalBody = document.getElementById('deviceDetailModalBody');
+          const prevScrollTop = modalBody ? modalBody.scrollTop : 0;
+          const s = deviceSubmissions.find(x=>x.id===deviceSubmissionDetailTarget);
+          if(!s) return;
+          const patch = {};
+          document.querySelectorAll('[data-device-edit]').forEach(el => {
+            const key = el.dataset.deviceEdit;
+            if(key === 'backupPowerSourcesText'){
+              patch.backupPowerSources = el.value.split(',').map(x=>x.trim()).filter(Boolean);
+            } else {
+              patch[key] = el.value;
+            }
+          });
+          const updated = Object.assign({}, s, patch);
+          await saveOneDeviceSubmission(updated);
+          render();
+          const modalBodyAfter = document.getElementById('deviceDetailModalBody');
+          if(modalBodyAfter) modalBodyAfter.scrollTop = prevScrollTop;
         };
       }
       if(deleteDeviceSubmissionTarget){
