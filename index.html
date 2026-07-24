@@ -1500,7 +1500,7 @@ function renderTopbar(isAdmin){
     </div>
     <div class="right">
       ${isAdmin ? '<span class="badge-admin">ADMIN</span>' : ''}
-      <button class="link-btn" id="logoutBtn">Exit</button>
+      <button class="link-btn" id="logoutBtn">${isAdmin ? 'Log Out' : 'Exit'}</button>
     </div>
   </div>`;
 }
@@ -3350,12 +3350,19 @@ function attachHandlers(){
   const $$ = sel => document.querySelectorAll(sel);
 
   const logoutBtn = $('#logoutBtn');
-  if(logoutBtn) logoutBtn.onclick = () => {
+  if(logoutBtn) logoutBtn.onclick = async () => {
     stopChatPolling();
     stopApplicationsPolling();
     stopSignupsPolling();
     stopDevicePolling();
     stopBookingsPolling();
+    if(currentAdminUser){
+      // Real admin session — actually sign out of Firebase, not just reset
+      // the view. onAuthStateChanged (set up in init) picks up the sign-out
+      // and handles switching back to the gate screen.
+      try{ await firebase.auth().signOut(); }catch(e){ console.error('Sign out failed:', e); }
+      return;
+    }
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
     bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
     render();
