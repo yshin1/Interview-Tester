@@ -1290,7 +1290,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -1578,6 +1578,7 @@ let tutorLoginError = '';
 let tutorLoginBusy = false;
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
+let tutorNameEditState = { value:'', error:'', success:'', busy:false };
 
 async function loadAllAdminData(){
   await Promise.all([loadBookings(), loadApplications(), loadAccountSignups(), loadDeviceSubmissions()]);
@@ -1975,6 +1976,8 @@ function renderStepInfo(){
 function renderBookDone(){
   const isTutorSession = !!currentTutorUser;
   const p = tutorChangePasswordState;
+  const n = tutorNameEditState;
+  if(isTutorSession && !n.value && !n.busy) n.value = bk.fullName;
   return `
   <div class="main-wrap">
     <div class="card">
@@ -1993,6 +1996,16 @@ function renderBookDone(){
 
       ${isTutorSession ? `
       <div class="card" style="margin-top:20px; background:#FAFBFC;">
+        <div class="section-title" style="font-size:13.5px;">Chat Display Name</div>
+        <div class="field">
+          <label>Name shown in chat</label>
+          <input type="text" id="tutorNameInput" placeholder="Your name" value="${escapeHtml(n.value)}">
+        </div>
+        ${n.error ? `<div class="error-text">${escapeHtml(n.error)}</div>` : ''}
+        ${n.success ? `<div class="success-text">${escapeHtml(n.success)}</div>` : ''}
+        <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorNameSaveBtn" ${n.busy?'disabled':''}>${n.busy?'Saving…':'Save Name'}</button>
+      </div>
+      <div class="card" style="margin-top:16px; background:#FAFBFC;">
         <div class="section-title" style="font-size:13.5px;">Change Password</div>
         <div class="field">
           <label>Current Password</label>
@@ -2946,6 +2959,8 @@ function renderAdminChats(){
 
 let tutorChatsSearchQuery = '';
 let tutorChatsFilterUnreadOnly = false;
+let editingTutorChatLabelId = null;
+let tutorChatLabelDraft = '';
 
 function renderAdminTutorChats(){
   const tutors = bookings.filter(b => b.tutorAccountCreated === true);
@@ -2973,11 +2988,21 @@ function renderAdminTutorChats(){
   const rows = sorted.length === 0 ? `<tr><td colspan="5" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const last = lastMessageInfo(b);
     const unread = unreadCountForAdmin(b);
-    const who = last ? (last.from === 'admin' ? 'You' : b.fullName) : '';
+    const displayLabel = b.adminChatLabel || b.fullName;
+    const who = last ? (last.from === 'admin' ? 'You' : displayLabel) : '';
     const preview = last ? (last.text.length > 60 ? last.text.slice(0,60)+'…' : last.text) : 'No messages yet';
+    const isEditing = editingTutorChatLabelId === b.id;
+    const nameCell = isEditing
+      ? `<div style="display:flex; align-items:center; gap:6px;">
+           <input type="text" id="tutorChatLabelInput-${b.id}" value="${escapeHtml(tutorChatLabelDraft)}" placeholder="${escapeHtml(b.fullName)}" style="padding:6px 8px; border:1.5px solid var(--line); border-radius:6px; font-size:12.5px; font-family:inherit; width:140px;">
+           <button class="btn btn-primary btn-sm" data-save-chat-label="${b.id}" style="padding:5px 9px;">✓</button>
+           <button class="btn btn-ghost btn-sm" data-cancel-chat-label="${b.id}" style="padding:5px 9px;">✕</button>
+         </div>`
+      : `<strong>${escapeHtml(displayLabel)}</strong> <button class="link-btn" data-edit-chat-label="${b.id}" style="font-size:11px; padding:0; margin-left:2px;">✏️</button>
+         ${b.adminChatLabel ? `<div style="font-size:10.5px; color:var(--slate-light);">Tutor's own name: ${escapeHtml(b.fullName)}</div>` : ''}`;
     return `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
+      <td>${nameCell}<br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
       <td style="max-width:340px;">
         ${last ? `<span style="font-weight:${unread>0?'700':'400'};">${escapeHtml(who)}:</span> <span style="color:${unread>0?'var(--ink)':'var(--slate)'};">${escapeHtml(preview)}</span>` : `<span style="color:var(--slate-light);">${preview}</span>`}
       </td>
@@ -3514,10 +3539,15 @@ function renderCancelModal(){
 
 function renderAdminChatModal(){
   const b = bookings.find(x => x.id === chatTarget.id) || chatTarget;
+  const isTutor = b.tutorAccountCreated === true;
+  const headerTitle = isTutor
+    ? escapeHtml(b.adminChatLabel || b.fullName)
+    : `${escapeHtml(b.fullName)} — ${fmtDateLabel(b.date)} ${b.time}`;
   return `
   <div class="modal-overlay" id="chatModalOverlay">
     <div class="modal" style="max-width:560px;">
-      <h3>${escapeHtml(b.fullName)} — ${fmtDateLabel(b.date)} ${b.time}</h3>
+      <h3>${headerTitle}</h3>
+      ${isTutor && b.adminChatLabel ? `<p style="font-size:11.5px; color:var(--slate-light); margin:-8px 0 12px;">Tutor's own name: ${escapeHtml(b.fullName)}</p>` : ''}
       ${renderChatPanel(b.id, 'admin')}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="chatModalCloseBtn">Close</button>
@@ -3995,6 +4025,34 @@ function attachHandlers(){
       bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
       render();
     };
+    const tutorNameInput = $('#tutorNameInput');
+    if(tutorNameInput){
+      tutorNameInput.oninput = e => { tutorNameEditState.value = e.target.value; };
+      $('#tutorNameSaveBtn').onclick = async () => {
+        const n = tutorNameEditState;
+        n.error=''; n.success='';
+        const newName = n.value.trim();
+        if(!newName){
+          n.error = 'Please enter a name.'; render(); return;
+        }
+        n.busy = true; render();
+        try{
+          const idx = bookings.findIndex(x=>x.id===bk.id);
+          if(idx !== -1){
+            const updated = Object.assign({}, bookings[idx], { fullName: newName });
+            const next = [...bookings]; next[idx] = updated;
+            await saveBookings(next);
+          }
+          bk.fullName = newName;
+          n.busy=false; n.success='Name updated.'; n.value = newName;
+          render();
+        }catch(e){
+          console.error('TUTOR NAME UPDATE ERROR:', e);
+          n.busy=false; n.error='Something went wrong saving your name. Please try again.';
+          render();
+        }
+      };
+    }
     const tcpCurrentInput = $('#tcpCurrentInput');
     if(tcpCurrentInput){
       tcpCurrentInput.oninput = e => { tutorChangePasswordState.currentPassword = e.target.value; };
@@ -4439,6 +4497,39 @@ Langdy Team`;
       }
       const toggle = $('#tutorChatsUnreadOnlyToggle');
       if(toggle) toggle.onchange = () => { tutorChatsFilterUnreadOnly = toggle.checked; render(); };
+      $$('[data-edit-chat-label]').forEach(el=>{
+        el.onclick = () => {
+          const id = el.dataset.editChatLabel;
+          const b = bookings.find(x=>x.id===id);
+          editingTutorChatLabelId = id;
+          tutorChatLabelDraft = (b && b.adminChatLabel) || '';
+          render();
+          const input = $(`#tutorChatLabelInput-${id}`);
+          if(input){ input.focus(); input.select(); }
+        };
+      });
+      $$('[data-cancel-chat-label]').forEach(el=>{
+        el.onclick = () => { editingTutorChatLabelId = null; tutorChatLabelDraft = ''; render(); };
+      });
+      $$(`[id^="tutorChatLabelInput-"]`).forEach(el=>{
+        el.oninput = e => { tutorChatLabelDraft = e.target.value; };
+        el.addEventListener('keydown', e => {
+          if(e.key==='Enter') $(`[data-save-chat-label="${editingTutorChatLabelId}"]`).click();
+          if(e.key==='Escape'){ editingTutorChatLabelId = null; tutorChatLabelDraft = ''; render(); }
+        });
+      });
+      $$('[data-save-chat-label]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.saveChatLabel;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const updated = Object.assign({}, bookings[idx], { adminChatLabel: tutorChatLabelDraft.trim() });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          editingTutorChatLabelId = null; tutorChatLabelDraft = '';
+          render();
+        };
+      });
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
           const id = el.dataset.chatId;
