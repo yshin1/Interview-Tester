@@ -2373,10 +2373,12 @@ function renderAdminApplications(){
       </td>
       <td>${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}</td>
       <td>
-        <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
-        ${(() => { const hist = getReapplicationHistory(a.email, a.id); return hist.length > 0
-          ? `<button class="btn btn-danger-outline btn-sm" data-reapp-history="${a.id}" style="margin-left:6px;">🔄 Reapplicant</button>`
-          : ''; })()}
+        <div class="row-actions">
+          <button class="btn btn-ghost btn-sm" style="width:auto;" data-view-app="${a.id}">View</button>
+          ${(() => { const hist = getReapplicationHistory(a.email, a.id); return hist.length > 0
+            ? `<button class="btn btn-danger-outline btn-sm" style="width:auto;" data-reapp-history="${a.id}">🔄 Reapplicant</button>`
+            : ''; })()}
+        </div>
       </td>
       <td style="padding-left:22px;"><button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button></td>
     </tr>`).join('');
