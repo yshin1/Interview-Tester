@@ -2375,7 +2375,7 @@ function renderAdminApplications(){
       <td>
         <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
         ${(() => { const hist = getReapplicationHistory(a.email, a.id); return hist.length > 0
-          ? `<button class="btn btn-danger-outline btn-sm" data-reapp-history="${a.id}" style="margin-left:6px;">🔄 지원여부</button>`
+          ? `<button class="btn btn-danger-outline btn-sm" data-reapp-history="${a.id}" style="margin-left:6px;">🔄 Reapplicant</button>`
           : ''; })()}
       </td>
       <td style="padding-left:22px;"><button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button></td>
@@ -2489,7 +2489,7 @@ function renderReapplicationHistoryModal(){
   return `
   <div class="modal-overlay" id="reappHistoryOverlay">
     <div class="modal" style="max-width:420px;">
-      <h3>🔄 재지원 이력 — ${escapeHtml(a.fullName)}</h3>
+      <h3>🔄 Reapplicant History — ${escapeHtml(a.fullName)}</h3>
       <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px;">This email has a record in Archive. Here's what happened before:</p>
       ${rows}
       <div class="modal-actions">
