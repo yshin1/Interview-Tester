@@ -2875,6 +2875,8 @@ function renderGuidelineRowHtml(item){
 }
 
 let chatsFilterUnreadOnly = false;
+let chatsFilterStage = 'all'; // 'all' | '1st' | '2nd'
+let chatsSearchQuery = '';
 
 function lastMessageInfo(b){
   const msgs = (b.messages || []).filter(m => m.from !== 'system');
@@ -2882,9 +2884,17 @@ function lastMessageInfo(b){
   return msgs[msgs.length - 1];
 }
 
+function chatStageOf(b){
+  return b.demoResult === 'pass' ? '2nd' : '1st';
+}
+
 function renderAdminChats(){
   const withMsgs = bookings.filter(b => lastMessageInfo(b) !== null);
-  const filtered = chatsFilterUnreadOnly ? withMsgs.filter(b => unreadCountForAdmin(b) > 0) : withMsgs;
+  let filtered = chatsFilterUnreadOnly ? withMsgs.filter(b => unreadCountForAdmin(b) > 0) : withMsgs;
+  if(chatsFilterStage !== 'all') filtered = filtered.filter(b => chatStageOf(b) === chatsFilterStage);
+  const q = chatsSearchQuery.trim().toLowerCase();
+  if(q) filtered = filtered.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q));
+
   const sorted = [...filtered].sort((a,b) => {
     const ta = new Date(lastMessageInfo(a).at).getTime();
     const tb = new Date(lastMessageInfo(b).at).getTime();
@@ -2893,10 +2903,11 @@ function renderAdminChats(){
 
   const totalUnreadThreads = withMsgs.filter(b => unreadCountForAdmin(b) > 0).length;
 
-  const rows = sorted.length === 0 ? `<tr><td colspan="5" style="padding:24px; text-align:center; color:var(--slate-light);">${chatsFilterUnreadOnly ? 'No unread messages.' : 'No conversations yet.'}</td></tr>` : sorted.map(b => {
+  const emptyMessage = q ? 'No conversations match that search.' : chatsFilterUnreadOnly ? 'No unread messages.' : 'No conversations yet.';
+  const rows = sorted.length === 0 ? `<tr><td colspan="5" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const last = lastMessageInfo(b);
     const unread = unreadCountForAdmin(b);
-    const stage = b.demoResult === 'pass' ? '2nd Demo' : '1st Demo';
+    const stage = chatStageOf(b) === '2nd' ? '2nd Demo' : '1st Demo';
     const who = last.from === 'admin' ? 'You' : b.fullName;
     const preview = last.text.length > 60 ? last.text.slice(0,60)+'…' : last.text;
     return `
@@ -2915,7 +2926,13 @@ function renderAdminChats(){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <label class="checkbox-item" style="cursor:pointer;">
+      <input type="text" id="chatsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(chatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <select id="chatsStageFilterSelect" style="padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${chatsFilterStage==='all'?'selected':''}>All stages</option>
+        <option value="1st" ${chatsFilterStage==='1st'?'selected':''}>1st Demo</option>
+        <option value="2nd" ${chatsFilterStage==='2nd'?'selected':''}>2nd Demo</option>
+      </select>
+      <label class="checkbox-item" style="cursor:pointer; white-space:nowrap;">
         <input type="checkbox" id="chatsUnreadOnlyToggle" ${chatsFilterUnreadOnly?'checked':''}>
         Unread only (${totalUnreadThreads})
       </label>
@@ -4393,6 +4410,14 @@ Langdy Team`;
     if(adminTab==='chats'){
       const toggle = $('#chatsUnreadOnlyToggle');
       if(toggle) toggle.onchange = () => { chatsFilterUnreadOnly = toggle.checked; render(); };
+      const stageSelect = $('#chatsStageFilterSelect');
+      if(stageSelect) stageSelect.onchange = e => { chatsFilterStage = e.target.value; render(); };
+      const searchInput = $('#chatsSearchInput');
+      if(searchInput){
+        searchInput.oninput = e => { chatsSearchQuery = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
           const id = el.dataset.chatId;
