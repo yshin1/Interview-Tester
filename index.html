@@ -1251,7 +1251,7 @@ function startApplicationsPolling(){
   if(appsPollTimer) return;
   appsPollTimer = setInterval(async () => {
     await loadApplications();
-    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !deleteApplicationTarget && !isFormControlFocused()){
+    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !deleteApplicationTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2174,6 +2174,7 @@ function renderAdmin(){
     ${chatTarget ? renderAdminChatModal() : ''}
     ${editingSecondDemo ? renderEditSecondDemoModal() : ''}
     ${applicationDetailTarget ? renderApplicationDetailModal() : ''}
+    ${reapplicationHistoryTarget ? renderReapplicationHistoryModal() : ''}
   </div>`;
 }
 
@@ -2333,6 +2334,7 @@ function notionRowFields(b){
   return [contactDateStr, '1st Demo', '', b.fullName, 'Not confirmed yet', b.assignedTo||'', demoDateStr, b.time + ' PHT'];
 }
 let applicationDetailTarget = null;
+let reapplicationHistoryTarget = null;
 let deleteApplicationTarget = null;
 let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
@@ -2370,7 +2372,12 @@ function renderAdminApplications(){
         </select>
       </td>
       <td>${a.invited ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>' : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`}</td>
-      <td><button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-view-app="${a.id}">View</button>
+        ${(() => { const hist = getReapplicationHistory(a.email, a.id); return hist.length > 0
+          ? `<button class="btn btn-danger-outline btn-sm" data-reapp-history="${a.id}" style="margin-left:6px;">🔄 지원여부</button>`
+          : ''; })()}
+      </td>
       <td style="padding-left:22px;"><button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button></td>
     </tr>`).join('');
 
@@ -2466,6 +2473,27 @@ function renderApplicationDetailModal(){
       ${fieldsHtml}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="appDetailCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderReapplicationHistoryModal(){
+  const a = applications.find(x => x.id === reapplicationHistoryTarget) || {};
+  const history = getReapplicationHistory(a.email, a.id);
+  const rows = history.map(ev => `
+    <div class="ticket-row">
+      <span class="k">${escapeHtml(ev.type)}</span>
+      <span class="v">${ev.date ? new Date(ev.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+    </div>`).join('');
+  return `
+  <div class="modal-overlay" id="reappHistoryOverlay">
+    <div class="modal" style="max-width:420px;">
+      <h3>🔄 재지원 이력 — ${escapeHtml(a.fullName)}</h3>
+      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px;">This email has a record in Archive. Here's what happened before:</p>
+      ${rows}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="reappHistoryCloseBtn">Close</button>
       </div>
     </div>
   </div>`;
@@ -3037,6 +3065,38 @@ function isArchivedBooking(b){
 // go anywhere re-apply next cycle under the same email.
 function isArchivedApplication(a){
   return a.result === 'fail';
+}
+
+// Gathers every past "archived" event for this email — failed applications,
+// failed demos, resignations, terminations — so admin can see at a glance
+// that someone applying now is a repeat applicant and where they dropped off
+// before. Excludes the current application record itself.
+function getReapplicationHistory(email, excludeAppId){
+  const emailNorm = (email||'').trim().toLowerCase();
+  if(!emailNorm) return [];
+  const events = [];
+  applications.forEach(a => {
+    if(a.id === excludeAppId) return;
+    if((a.email||'').trim().toLowerCase() === emailNorm && isArchivedApplication(a)){
+      events.push({ type: 'Application — Failed', date: a.submittedAt });
+    }
+  });
+  bookings.forEach(b => {
+    if((b.email||'').trim().toLowerCase() !== emailNorm) return;
+    if(b.demoResult === 'fail'){
+      events.push({ type: '1st Demo — Failed', date: b.date });
+    }
+    if(b.secondDemoResult === 'fail'){
+      events.push({ type: '2nd Demo — Failed', date: b.secondDemoDate || b.date });
+    }
+    if(b.tutorEmploymentStatus === 'resigned'){
+      events.push({ type: 'Tutor — Resigned', date: b.tutorEmploymentDate });
+    }
+    if(b.tutorEmploymentStatus === 'terminated'){
+      events.push({ type: 'Tutor — Terminated', date: b.tutorEmploymentDate });
+    }
+  });
+  return events.sort((x,y) => new Date(y.date||0) - new Date(x.date||0));
 }
 
 function renderAdminTutorChats(){
@@ -4447,6 +4507,10 @@ Langdy Team`;
         el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
       });
 
+      $$('[data-reapp-history]').forEach(el=>{
+        el.onclick = () => { reapplicationHistoryTarget = el.dataset.reappHistory; render(); };
+      });
+
       $$('[data-delete-app]').forEach(el=>{
         el.onclick = () => { deleteApplicationTarget = el.dataset.deleteApp; render(); };
       });
@@ -5344,6 +5408,11 @@ Langdy Team`;
         const a = applications.find(x=>x.id===applicationDetailTarget);
         saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
       };
+    }
+
+    if(reapplicationHistoryTarget){
+      $('#reappHistoryCloseBtn').onclick = () => { reapplicationHistoryTarget=null; render(); };
+      $('#reappHistoryOverlay').onclick = (e) => { if(e.target.id==='reappHistoryOverlay'){ reapplicationHistoryTarget=null; render(); } };
     }
 
     if(adminTab==='archiveApplication'){
