@@ -1406,6 +1406,14 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function isValidEmail(v){ return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test((v||'').trim()); }
+// Keeps a text field small (one line) by default, only growing taller once
+// the person actually types a line break or enough text to wrap — instead of
+// every text field reserving 3 rows of empty space up front.
+function autoGrowTextarea(el){
+  if(!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(44, el.scrollHeight) + 'px';
+}
 function isValidFullName(v){ return v.trim().length>=2; }
 
 // Small banner shown at the top of Applications / Account Signups tabs with
@@ -1721,7 +1729,7 @@ function renderDynamicField(formKey, field, value, fileName){
       return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap;">${escapeHtml(field.label)}</div>${field.description ? `<div style="font-size:12px; color:var(--slate-light); margin:-8px 0 10px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : ''}`;
     case 'text':
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
-      return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="3" style="resize:vertical; min-height:66px;">${escapeHtml(value||'')}</textarea></div>`;
+      return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="1" class="auto-grow-textarea" style="resize:vertical; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(value||'')}</textarea></div>`;
     case 'email':
       return `<div class="field">${labelBlock}<input type="email" id="${idAttr}" placeholder="name@example.com" value="${escapeHtml(value||'')}"></div>`;
     case 'select':
@@ -3903,7 +3911,11 @@ function attachHandlers(){
       } else if(field.type === 'select' || field.type === 'yesno'){
         el.onchange = e => { state.answers[field.id] = e.target.value; };
       } else {
-        el.oninput = e => { state.answers[field.id] = e.target.value; };
+        if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        el.oninput = e => {
+          state.answers[field.id] = e.target.value;
+          if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        };
       }
     });
     const submitBtn = $('#applySubmitBtn');
@@ -3973,7 +3985,11 @@ function attachHandlers(){
       } else if(field.type === 'select' || field.type === 'yesno'){
         el.onchange = e => { state.answers[field.id] = e.target.value; };
       } else {
-        el.oninput = e => { state.answers[field.id] = e.target.value; };
+        if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        el.oninput = e => {
+          state.answers[field.id] = e.target.value;
+          if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        };
       }
     });
     const submitBtn = $('#signupSubmitBtn');
@@ -4039,7 +4055,11 @@ function attachHandlers(){
       } else if(field.type === 'select' || field.type === 'yesno'){
         el.onchange = e => { state.answers[field.id] = e.target.value; };
       } else {
-        el.oninput = e => { state.answers[field.id] = e.target.value; };
+        if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        el.oninput = e => {
+          state.answers[field.id] = e.target.value;
+          if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+        };
       }
     });
     const submitBtn = $('#deviceSubmitBtn');
