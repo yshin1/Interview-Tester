@@ -1300,7 +1300,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2063,6 +2063,13 @@ function renderChatPanel(bookingId, viewerRole){
 const TAB_GROUPS = [
   { label: 'Calendar', tab: 'calendar' },
   { label: 'Applications', tab: 'applications' },
+  { label: 'Archive', children: [
+      ['archive1stDemo','1st Demo'],
+      ['archive2ndDemo','2nd Demo'],
+      ['archiveResigned','Resigned'],
+      ['archiveTerminated','Terminated']
+    ]
+  },
   { label: 'Demo', children: [
       ['list','1st Demo'],
       ['secondDemo','2nd Demo'],
@@ -2142,6 +2149,10 @@ function renderAdmin(){
   else if(adminTab==='tutorChats') body = renderAdminTutorChats();
   else if(adminTab==='resignedTutors') body = renderAdminFormerTutors('resigned');
   else if(adminTab==='terminatedTutors') body = renderAdminFormerTutors('terminated');
+  else if(adminTab==='archive1stDemo') body = renderAdminArchive('1stDemo');
+  else if(adminTab==='archive2ndDemo') body = renderAdminArchive('2ndDemo');
+  else if(adminTab==='archiveResigned') body = renderAdminArchive('resigned');
+  else if(adminTab==='archiveTerminated') body = renderAdminArchive('terminated');
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
@@ -2158,6 +2169,7 @@ function renderAdmin(){
     ${cancelTarget ? renderCancelModal() : ''}
     ${chatTarget ? renderAdminChatModal() : ''}
     ${editingSecondDemo ? renderEditSecondDemoModal() : ''}
+    ${applicationDetailTarget ? renderApplicationDetailModal() : ''}
   </div>`;
 }
 
@@ -2389,7 +2401,6 @@ function renderAdminApplications(){
       <tbody>${rows}</tbody>
     </table>
   </div>
-  ${applicationDetailTarget ? renderApplicationDetailModal() : ''}
   ${deleteApplicationTarget ? renderDeleteApplicationModal() : ''}`;
 }
 
@@ -3122,6 +3133,65 @@ function renderAdminFormerTutors(status){
     </div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Date</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+let archiveSearchQuery = { '1stDemo': '', '2ndDemo': '', resigned: '', terminated: '' };
+
+// Archive: a record of people who are no longer active in the current
+// recruiting cycle — failed at either demo stage, or tutors who resigned or
+// were let go. Kept separate from Applications so this quarter's pipeline
+// stays uncluttered by past cycles, while still being one click away.
+function renderAdminArchive(category){
+  const config = {
+    '1stDemo': { title: '1st Demo — Failed', filter: b => b.demoResult === 'fail', dateField: null, emptyMsg: 'No one has failed the 1st Demo yet.' },
+    '2ndDemo': { title: '2nd Demo — Failed', filter: b => b.secondDemoResult === 'fail', dateField: null, emptyMsg: 'No one has failed the 2nd Demo yet.' },
+    resigned: { title: 'Resigned Tutors', filter: b => b.tutorEmploymentStatus === 'resigned', dateField: 'tutorEmploymentDate', emptyMsg: 'No resigned tutors on record.' },
+    terminated: { title: 'Terminated Tutors', filter: b => b.tutorEmploymentStatus === 'terminated', dateField: 'tutorEmploymentDate', emptyMsg: 'No terminated tutors on record.' }
+  }[category];
+
+  const all = bookings.filter(config.filter);
+  const q = archiveSearchQuery[category].trim().toLowerCase();
+  const filtered = q
+    ? all.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q))
+    : all;
+
+  const sorted = [...filtered].sort((a,b) => {
+    const dateA = config.dateField ? a[config.dateField] : a.submittedAt;
+    const dateB = config.dateField ? b[config.dateField] : b.submittedAt;
+    return new Date(dateB||0) - new Date(dateA||0);
+  });
+
+  const emptyMessage = all.length === 0 ? config.emptyMsg : 'No one matches that search.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+    const dateVal = config.dateField ? b[config.dateField] : b.submittedAt;
+    const dateStr = dateVal ? new Date(dateVal).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    const matchingApp = applications.find(a => (a.email||'').trim().toLowerCase() === (b.email||'').trim().toLowerCase());
+    return `
+    <tr>
+      <td><strong>${escapeHtml(b.adminChatLabel || b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
+      <td class="tag">${dateStr}</td>
+      <td>
+        <div class="row-actions">
+          ${matchingApp ? `<button class="btn btn-ghost btn-sm" data-view-app="${matchingApp.id}">📄 View Application</button>` : ''}
+          <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-bottom:4px;">${config.title}</div>
+    <div class="section-desc" style="margin-bottom:14px;">${all.length} on record${q ? `, ${filtered.length} shown` : ''}</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="archiveSearchInput" data-category="${category}" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery[category])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    </div>
+    <table class="list-table">
+      <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -4327,34 +4397,6 @@ Langdy Team`;
         render();
       };
 
-      if(applicationDetailTarget){
-        $('#appDetailCloseBtn').onclick = () => { applicationDetailTarget=null; render(); };
-        $('#appDetailOverlay').onclick = (e) => { if(e.target.id==='appDetailOverlay'){ applicationDetailTarget=null; render(); } };
-
-        const saveAppField = async (patch) => {
-          const idx = applications.findIndex(x=>x.id===applicationDetailTarget);
-          if(idx===-1) return;
-          const updated = Object.assign({}, applications[idx], patch);
-          await saveOneApplication(updated);
-          render();
-        };
-        const scoreInput = $('#appScoreInput');
-        if(scoreInput) scoreInput.onchange = e => {
-          const v = e.target.value === '' ? null : Math.max(0, Math.min(10, Number(e.target.value)));
-          saveAppField({ score: v });
-        };
-        const passBtn = $('#appPassBtn');
-        if(passBtn) passBtn.onclick = () => {
-          const a = applications.find(x=>x.id===applicationDetailTarget);
-          saveAppField({ result: (a && a.result==='pass') ? '' : 'pass' });
-        };
-        const failBtn = $('#appFailBtn');
-        if(failBtn) failBtn.onclick = () => {
-          const a = applications.find(x=>x.id===applicationDetailTarget);
-          saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
-        };
-      }
-
       if(deleteApplicationTarget){
         $('#deleteAppNoBtn').onclick = () => { deleteApplicationTarget=null; render(); };
         $('#deleteAppOverlay').onclick = (e) => { if(e.target.id==='deleteAppOverlay'){ deleteApplicationTarget=null; render(); } };
@@ -5192,6 +5234,57 @@ Langdy Team`;
         cancelTarget = null;
         render();
       };
+    }
+
+    if(applicationDetailTarget){
+      $('#appDetailCloseBtn').onclick = () => { applicationDetailTarget=null; render(); };
+      $('#appDetailOverlay').onclick = (e) => { if(e.target.id==='appDetailOverlay'){ applicationDetailTarget=null; render(); } };
+
+      const saveAppField = async (patch) => {
+        const idx = applications.findIndex(x=>x.id===applicationDetailTarget);
+        if(idx===-1) return;
+        const updated = Object.assign({}, applications[idx], patch);
+        await saveOneApplication(updated);
+        render();
+      };
+      const scoreInput = $('#appScoreInput');
+      if(scoreInput) scoreInput.onchange = e => {
+        const v = e.target.value === '' ? null : Math.max(0, Math.min(10, Number(e.target.value)));
+        saveAppField({ score: v });
+      };
+      const passBtn = $('#appPassBtn');
+      if(passBtn) passBtn.onclick = () => {
+        const a = applications.find(x=>x.id===applicationDetailTarget);
+        saveAppField({ result: (a && a.result==='pass') ? '' : 'pass' });
+      };
+      const failBtn = $('#appFailBtn');
+      if(failBtn) failBtn.onclick = () => {
+        const a = applications.find(x=>x.id===applicationDetailTarget);
+        saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
+      };
+    }
+
+    if(adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
+      const searchInput = $('#archiveSearchInput');
+      if(searchInput){
+        const category = searchInput.dataset.category;
+        searchInput.oninput = e => { archiveSearchQuery[category] = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
+      $$('[data-view-app]').forEach(el=>{
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+      });
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          chatDraftText = '';
+          render();
+          await markChatReadByAdmin(id);
+          render();
+        };
+      });
     }
 
     if(chatTarget){
