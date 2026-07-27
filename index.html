@@ -1405,7 +1405,7 @@ function fmtDateLabel(dateStr){
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+function isValidEmail(v){ return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test((v||'').trim()); }
 function isValidFullName(v){ return v.trim().length>=2; }
 
 // Small banner shown at the top of Applications / Account Signups tabs with
