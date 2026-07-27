@@ -5559,16 +5559,16 @@ Langdy Team`;
     firebase.auth().onAuthStateChanged(async (user) => {
       const isInitialCheck = !tutorAuthInitialCheckDone;
       tutorAuthInitialCheckDone = true;
-      currentTutorUser = user;
 
       if(!cameFromTutorLink){
-        // Don't auto-route based on a persisted tutor session unless this
-        // pageview is specifically the tutor link — same principle as the
-        // admin side: a background/persisted session shouldn't leak into
-        // an unrelated page.
+        // Don't let a persisted tutor session (from this same browser,
+        // unrelated to this pageview) leak into a regular tester's booking
+        // flow — currentTutorUser must stay null here so renderBookDone()
+        // shows the normal ticket UI, not the tutor chat UI.
         render();
         return;
       }
+      currentTutorUser = user;
 
       if(user){
         tutorLoginBusy = false;
