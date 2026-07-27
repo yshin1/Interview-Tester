@@ -2492,9 +2492,12 @@ function renderReapplicationHistoryModal(){
   const a = applications.find(x => x.id === reapplicationHistoryTarget) || {};
   const history = getReapplicationHistory(a.email, a.id);
   const rows = history.map(ev => `
-    <div class="ticket-row">
-      <span class="k">${escapeHtml(ev.type)}</span>
-      <span class="v">${ev.date ? new Date(ev.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+    <div style="padding:10px 0; border-bottom:1px dashed var(--line);">
+      <div class="ticket-row" style="border:none; padding:0;">
+        <span class="k">${escapeHtml(ev.type)}</span>
+        <span class="v">${ev.date ? new Date(ev.date).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+      </div>
+      ${ev.note ? `<div style="font-size:12px; color:var(--slate); margin-top:4px; white-space:pre-wrap;">📝 ${escapeHtml(ev.note)}</div>` : ''}
     </div>`).join('');
   return `
   <div class="modal-overlay" id="reappHistoryOverlay">
@@ -3100,10 +3103,10 @@ function getReapplicationHistory(email, excludeAppId){
       events.push({ type: '2nd Demo — Failed', date: b.secondDemoDate || b.date });
     }
     if(b.tutorEmploymentStatus === 'resigned'){
-      events.push({ type: 'Tutor — Resigned', date: b.tutorEmploymentDate });
+      events.push({ type: 'Tutor — Resigned', date: b.tutorEmploymentDate, note: b.tutorEmploymentNote });
     }
     if(b.tutorEmploymentStatus === 'terminated'){
-      events.push({ type: 'Tutor — Terminated', date: b.tutorEmploymentDate });
+      events.push({ type: 'Tutor — Terminated', date: b.tutorEmploymentDate, note: b.tutorEmploymentNote });
     }
   });
   return events.sort((x,y) => new Date(y.date||0) - new Date(x.date||0));
@@ -3204,13 +3207,14 @@ function renderAdminFormerTutors(status){
     ? `No ${label.toLowerCase()} tutors on record.`
     : 'No one matches that search.';
 
-  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const displayLabel = b.adminChatLabel || b.fullName;
-    const dateStr = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    const dateVal = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).toISOString().slice(0,10) : '';
     return `
     <tr>
       <td><strong>${escapeHtml(displayLabel)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
-      <td class="tag">${dateStr}</td>
+      <td><input type="date" data-employment-date="${b.id}" value="${dateVal}" style="padding:7px 8px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;"></td>
+      <td><textarea data-employment-note="${b.id}" placeholder="Reason / notes (optional)" rows="1" class="auto-grow-textarea" style="width:100%; min-width:160px; min-height:38px; height:38px; overflow:hidden; resize:vertical; padding:7px 10px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;">${escapeHtml(b.tutorEmploymentNote||'')}</textarea></td>
       <td>
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
@@ -3226,7 +3230,7 @@ function renderAdminFormerTutors(status){
       <input type="text" id="formerTutorsSearchInput" data-status="${status}" placeholder="Search by name…" value="${escapeHtml(formerTutorsSearchQuery[status])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
     <table class="list-table">
-      <thead><tr><th>Tutor</th><th>Date</th><th>Manage</th></tr></thead>
+      <thead><tr><th>Tutor</th><th>Date</th><th>Note</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -4892,6 +4896,32 @@ Langdy Team`;
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
           render();
+        };
+      });
+      $$('[data-employment-date]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.employmentDate;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          // Date-only input (no time) — store as a plain ISO date string.
+          const newDate = el.value ? new Date(el.value + 'T00:00:00').toISOString() : null;
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentDate: newDate });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-employment-note]').forEach(el=>{
+        autoGrowTextarea(el);
+        el.oninput = () => { autoGrowTextarea(el); };
+        el.onblur = async () => {
+          const id = el.dataset.employmentNote;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          if((bookings[idx].tutorEmploymentNote||'') === el.value) return; // no change, skip save
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentNote: el.value });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
         };
       });
       $$('[data-chat-id]').forEach(el=>{
