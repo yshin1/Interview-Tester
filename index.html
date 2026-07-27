@@ -5502,6 +5502,16 @@ Langdy Team`;
       const isInitialCheck = !adminAuthInitialCheckDone;
       adminAuthInitialCheckDone = true;
 
+      if(!cameFromAdminLink && view !== 'admin'){
+        // Don't let a persisted admin session (from this same browser,
+        // unrelated to this pageview) leak into currentAdminUser — e.g. on
+        // a ?tutor page, this would make the topbar's Log Out button think
+        // an admin session is active and sign that out instead of the
+        // tutor's own session.
+        render();
+        return;
+      }
+
       const isRealAdmin = !!user && isAllowedAdminEmail(user.email);
       currentAdminUser = isRealAdmin ? user : null;
 
