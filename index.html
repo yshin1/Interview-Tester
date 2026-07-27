@@ -3185,6 +3185,7 @@ function renderAdminArchiveApplications(){
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-view-app="${a.id}">📄 View Application</button>
           ${matchingBooking ? `<button class="btn btn-ghost btn-sm" data-chat-id="${matchingBooking.id}">💬 Open Chat</button>` : ''}
+          <button class="btn btn-ghost btn-sm" data-restore-app="${a.id}">↩ Restore</button>
         </div>
       </td>
     </tr>`;
@@ -5362,6 +5363,15 @@ Langdy Team`;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
+          render();
+        };
+      });
+      $$('[data-restore-app]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.restoreApp;
+          const idx = applications.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          await saveOneApplication(Object.assign({}, applications[idx], { result: '' }));
           render();
         };
       });
