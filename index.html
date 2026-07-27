@@ -346,11 +346,11 @@ async function loadFormImages(){
 }
 async function saveFormImage(id, label, dataUrl){
   const data = { label, dataUrl, uploadedAt: new Date().toISOString() };
-  await db.collection(FORM_IMAGES_COLLECTION).doc(id).set(data);
+  await adminDb.collection(FORM_IMAGES_COLLECTION).doc(id).set(data);
   customFormImages[id] = data;
 }
 async function deleteFormImage(id){
-  await db.collection(FORM_IMAGES_COLLECTION).doc(id).delete();
+  await adminDb.collection(FORM_IMAGES_COLLECTION).doc(id).delete();
   delete customFormImages[id];
 }
 
@@ -849,6 +849,14 @@ const KV_COLLECTION = 'kv';
 // back out — the two need to be fully isolated, not just logically gated.
 const adminApp = firebase.initializeApp(firebaseConfig, 'admin-app');
 const adminAuth = adminApp.auth();
+// Firestore rules require request.auth != null to read/update several
+// collections (applications, account signups, device submissions, etc).
+// Since the admin authenticates on the SEPARATE adminApp instance (to keep
+// admin/tutor sessions from interfering with each other), reads made through
+// the default `db` never carry the admin's auth token and silently fail the
+// rules check — hence a dedicated Firestore instance tied to adminApp for
+// every admin-gated read/write.
+const adminDb = adminApp.firestore();
 
 // Firebase Auth has no built-in "roles" without a backend (Admin SDK/custom
 // claims), so anyone who can successfully sign in — including an invited
@@ -907,7 +915,7 @@ const storage = {
   },
   async set(key, value){
     const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
-    await db.collection(KV_COLLECTION).doc(key).set({ value: stringValue });
+    await adminDb.collection(KV_COLLECTION).doc(key).set({ value: stringValue });
     return { key, ok: true };
   }
 };
@@ -1030,7 +1038,7 @@ const APPLICATIONS_COLLECTION = 'applications';
 // each other's data (each writes to their own document).
 async function loadApplications(){
   try{
-    const snap = await db.collection(APPLICATIONS_COLLECTION).get();
+    const snap = await adminDb.collection(APPLICATIONS_COLLECTION).get();
     applications = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     applications = [];
@@ -1039,12 +1047,12 @@ async function loadApplications(){
 }
 async function saveOneApplication(app){
   const { id, ...data } = app;
-  await db.collection(APPLICATIONS_COLLECTION).doc(id).set(data);
+  await adminDb.collection(APPLICATIONS_COLLECTION).doc(id).set(data);
   const idx = applications.findIndex(x => x.id === id);
   if(idx === -1) applications.push(app); else applications[idx] = app;
 }
 async function deleteOneApplication(id){
-  await db.collection(APPLICATIONS_COLLECTION).doc(id).delete();
+  await adminDb.collection(APPLICATIONS_COLLECTION).doc(id).delete();
   applications = applications.filter(x => x.id !== id);
 }
 
@@ -1052,7 +1060,7 @@ let accountSignups = [];
 const ACCOUNT_SIGNUPS_COLLECTION = 'accountSignups';
 async function loadAccountSignups(){
   try{
-    const snap = await db.collection(ACCOUNT_SIGNUPS_COLLECTION).get();
+    const snap = await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).get();
     accountSignups = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     accountSignups = [];
@@ -1061,12 +1069,12 @@ async function loadAccountSignups(){
 }
 async function saveOneAccountSignup(rec){
   const { id, ...data } = rec;
-  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).set(data);
+  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).set(data);
   const idx = accountSignups.findIndex(x => x.id === id);
   if(idx === -1) accountSignups.push(rec); else accountSignups[idx] = rec;
 }
 async function deleteOneAccountSignup(id){
-  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
+  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
   accountSignups = accountSignups.filter(x => x.id !== id);
 }
 
@@ -1074,7 +1082,7 @@ let deviceSubmissions = [];
 const DEVICE_SUBMISSIONS_COLLECTION = 'deviceSubmissions';
 async function loadDeviceSubmissions(){
   try{
-    const snap = await db.collection(DEVICE_SUBMISSIONS_COLLECTION).get();
+    const snap = await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).get();
     deviceSubmissions = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     deviceSubmissions = [];
@@ -1083,12 +1091,12 @@ async function loadDeviceSubmissions(){
 }
 async function saveOneDeviceSubmission(rec){
   const { id, ...data } = rec;
-  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).set(data);
+  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).set(data);
   const idx = deviceSubmissions.findIndex(x => x.id === id);
   if(idx === -1) deviceSubmissions.push(rec); else deviceSubmissions[idx] = rec;
 }
 async function deleteOneDeviceSubmission(id){
-  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
+  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
   deviceSubmissions = deviceSubmissions.filter(x => x.id !== id);
 }
 
@@ -1300,7 +1308,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2183,6 +2191,7 @@ function renderAdmin(){
     ${editingSecondDemo ? renderEditSecondDemoModal() : ''}
     ${applicationDetailTarget ? renderApplicationDetailModal() : ''}
     ${reapplicationHistoryTarget ? renderReapplicationHistoryModal() : ''}
+    ${deleteTutorChatTarget ? renderDeleteTutorChatModal() : ''}
   </div>`;
 }
 
@@ -2344,6 +2353,7 @@ function notionRowFields(b){
 let applicationDetailTarget = null;
 let reapplicationHistoryTarget = null;
 let deleteApplicationTarget = null;
+let deleteTutorChatTarget = null;
 let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
@@ -2524,6 +2534,26 @@ function renderDeleteApplicationModal(){
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deleteAppNoBtn">Keep it</button>
         <button class="btn btn-danger-outline" id="deleteAppYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderDeleteTutorChatModal(){
+  const b = bookings.find(x => x.id === deleteTutorChatTarget) || {};
+  return `
+  <div class="modal-overlay" id="deleteTutorChatOverlay">
+    <div class="modal">
+      <h3>Delete this tutor's chat?</h3>
+      <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:0 0 4px;">
+        This will permanently remove <strong>${escapeHtml(b.adminChatLabel || b.fullName)}</strong>'s (${escapeHtml(b.email)}) entire chat history and booking record from this list. This cannot be undone.
+      </p>
+      <p style="font-size:12px; color:var(--slate-light); line-height:1.5; margin:8px 0 0;">
+        Note: this only removes them from this app — it doesn't delete their actual Firebase login account. To fully remove their ability to sign in, delete their user under Firebase Console → Authentication.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="deleteTutorChatNoBtn">Keep it</button>
+        <button class="btn btn-danger-outline" id="deleteTutorChatYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
       </div>
     </div>
   </div>`;
@@ -3166,6 +3196,7 @@ function renderAdminTutorChats(){
             <option value="resigned">Resigned</option>
             <option value="terminated">Terminated</option>
           </select>
+          <button class="btn btn-danger-outline btn-sm" style="width:auto;" data-delete-tutor-chat="${b.id}">🗑</button>
         </div>
       </td>
     </tr>`;
@@ -4561,8 +4592,8 @@ Langdy Team`;
         const emails = selected.map(a => a.email).join(',');
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
         window.open(gmailUrl, '_blank');
-        const batch = db.batch();
-        selected.forEach(a => { batch.update(db.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true }); });
+        const batch = adminDb.batch();
+        selected.forEach(a => { batch.update(adminDb.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true }); });
         await batch.commit();
         applications = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
         selectedApplicationIds = new Set();
@@ -4876,6 +4907,9 @@ Langdy Team`;
           await saveBookings(next);
           render();
         };
+      });
+      $$('[data-delete-tutor-chat]').forEach(el=>{
+        el.onclick = () => { deleteTutorChatTarget = el.dataset.deleteTutorChat; render(); };
       });
     }
 
@@ -5469,6 +5503,18 @@ Langdy Team`;
     if(reapplicationHistoryTarget){
       $('#reappHistoryCloseBtn').onclick = () => { reapplicationHistoryTarget=null; render(); };
       $('#reappHistoryOverlay').onclick = (e) => { if(e.target.id==='reappHistoryOverlay'){ reapplicationHistoryTarget=null; render(); } };
+    }
+
+    if(deleteTutorChatTarget){
+      $('#deleteTutorChatNoBtn').onclick = () => { deleteTutorChatTarget=null; render(); };
+      $('#deleteTutorChatOverlay').onclick = (e) => { if(e.target.id==='deleteTutorChatOverlay'){ deleteTutorChatTarget=null; render(); } };
+      $('#deleteTutorChatYesBtn').onclick = async () => {
+        const id = deleteTutorChatTarget;
+        const next = bookings.filter(b => b.id !== id);
+        await saveBookings(next);
+        deleteTutorChatTarget = null;
+        render();
+      };
     }
 
     if(adminTab==='archiveApplication'){
