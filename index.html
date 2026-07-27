@@ -5190,10 +5190,11 @@ Langdy Team`;
         // the not-an-admin rejection above, this callback fires again right
         // after that forced signOut(), and clearing it would wipe the
         // message before the person ever sees it.)
-        // On a real sign-out (not the very first check on page load), go
-        // back to the admin sign-in form if this session started from the
-        // ?admin link — otherwise the plain applicant access-code screen.
-        if(!isInitialCheck) gateMode = cameFromAdminLink ? 'adminLogin' : 'code';
+        // Only touch gateMode when we're actually in an admin-link context —
+        // this listener runs on every page (tutor pages included), and
+        // blindly resetting to 'code' here would stomp on whatever the
+        // tutor listener just set up on a ?tutor page.
+        if(!isInitialCheck && cameFromAdminLink) gateMode = 'adminLogin';
         if(view === 'admin') view = 'gate';
       }
       render();
