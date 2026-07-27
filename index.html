@@ -5169,7 +5169,8 @@ Langdy Team`;
       }
 
       if(isRealAdmin){
-        adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
+        adminLoginBusy = false; adminLoginError = '';
+        if(cameFromAdminLink) gateMode = 'code';
         // Only auto-jump to the admin dashboard when this pageview came in
         // through the dedicated ?admin link (or we're already there this
         // session). Visiting the plain shared link should always show the
