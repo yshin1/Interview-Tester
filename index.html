@@ -2099,6 +2099,22 @@ function findTabGroup(tab){
   return TAB_GROUPS[0];
 }
 
+function unreadCountForTabKey(key){
+  if(key === 'chats'){
+    return bookings.filter(b => lastMessageInfo(b) !== null).reduce((sum,b) => sum + unreadCountForAdmin(b), 0);
+  }
+  if(key === 'tutorChats'){
+    return bookings.filter(b => b.tutorAccountCreated === true && !isFormerTutor(b)).reduce((sum,b) => sum + unreadCountForAdmin(b), 0);
+  }
+  if(key === 'resignedTutors'){
+    return bookings.filter(b => b.tutorAccountCreated === true && b.tutorEmploymentStatus === 'resigned').reduce((sum,b) => sum + unreadCountForAdmin(b), 0);
+  }
+  if(key === 'terminatedTutors'){
+    return bookings.filter(b => b.tutorAccountCreated === true && b.tutorEmploymentStatus === 'terminated').reduce((sum,b) => sum + unreadCountForAdmin(b), 0);
+  }
+  return 0;
+}
+
 function renderAdmin(){
   const currentGroup = findTabGroup(adminTab);
   const primaryTabsHtml = TAB_GROUPS.map(g => {
@@ -2108,7 +2124,10 @@ function renderAdmin(){
   }).join('');
   const subTabsHtml = currentGroup.children ? `
     <div class="admin-subtabs">
-      ${currentGroup.children.map(([k,label]) => `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}</div>`).join('')}
+      ${currentGroup.children.map(([k,label]) => {
+        const unread = unreadCountForTabKey(k);
+        return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${unread>0?`<span class="unread-badge" style="margin-left:6px;">${unread}</span>`:''}</div>`;
+      }).join('')}
     </div>` : '';
 
   let body = '';
@@ -2408,7 +2427,12 @@ function renderApplicationDetailModal(){
       ${row('Weekdays 17:00–23:00', a.weekdayEvening)}
       ${row('Weekends (3+ hrs)', a.weekend)}
       ${row('KakaoTalk ID', a.kakaoId)}
-      ${row('Teaching experience', a.teachingExperience)}
+      ${a.teachingExperience ? `
+      <div class="field">
+        <label>Teaching experience</label>
+        <div style="white-space:pre-wrap; font-size:13.5px; line-height:1.6; margin-top:4px;">${escapeHtml(a.teachingExperience)}</div>
+      </div>
+      ` : row('Teaching experience', a.teachingExperience)}
       ${a.recordingUrl ? `
       <div class="field">
         <label>Voice Recording</label>
