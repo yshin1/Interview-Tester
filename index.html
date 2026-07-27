@@ -1300,7 +1300,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='formerTutors') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2079,7 +2079,8 @@ const TAB_GROUPS = [
   { label: 'Chat', children: [
       ['chats','All Chats'],
       ['tutorChats','Tutor Chats'],
-      ['formerTutors','Resigned/Terminated']
+      ['resignedTutors','Resigned'],
+      ['terminatedTutors','Terminated']
     ]
   },
   { label: 'Forms', children: [
@@ -2120,7 +2121,8 @@ function renderAdmin(){
   else if(adminTab==='deviceSubmissions') body = renderAdminDeviceSubmissions();
   else if(adminTab==='chats') body = renderAdminChats();
   else if(adminTab==='tutorChats') body = renderAdminTutorChats();
-  else if(adminTab==='formerTutors') body = renderAdminFormerTutors();
+  else if(adminTab==='resignedTutors') body = renderAdminFormerTutors('resigned');
+  else if(adminTab==='terminatedTutors') body = renderAdminFormerTutors('terminated');
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
@@ -3008,7 +3010,6 @@ function renderAdminTutorChats(){
     const who = last ? (last.from === 'admin' ? 'You' : displayLabel) : '';
     const preview = last ? (last.text.length > 60 ? last.text.slice(0,60)+'…' : last.text) : 'No messages yet';
     const isEditing = editingTutorChatLabelId === b.id;
-    const revoked = b.tutorAccessRevoked === true;
     const nameCell = isEditing
       ? `<div style="display:flex; align-items:center; gap:6px;">
            <input type="text" id="tutorChatLabelInput-${b.id}" value="${escapeHtml(tutorChatLabelDraft)}" placeholder="${escapeHtml(b.fullName)}" style="padding:6px 8px; border:1.5px solid var(--line); border-radius:6px; font-size:12.5px; font-family:inherit; width:140px;">
@@ -3016,7 +3017,6 @@ function renderAdminTutorChats(){
            <button class="btn btn-ghost btn-sm" data-cancel-chat-label="${b.id}" style="padding:5px 9px;">✕</button>
          </div>`
       : `<strong>${escapeHtml(displayLabel)}</strong> <button class="link-btn" data-edit-chat-label="${b.id}" style="font-size:11px; padding:0; margin-left:2px;">✏️</button>
-         ${revoked ? `<div style="font-size:10.5px; color:var(--danger); font-weight:700;">🚫 Access disabled</div>` : ''}
          ${b.adminChatLabel ? `<div style="font-size:10.5px; color:var(--slate-light);">Tutor's own name: ${escapeHtml(b.fullName)}</div>` : ''}`;
     return `
     <tr>
@@ -3029,13 +3029,10 @@ function renderAdminTutorChats(){
       <td>
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
-          ${revoked
-            ? `<button class="btn btn-ghost btn-sm" data-restore-tutor-access="${b.id}">✓ Restore Access</button>`
-            : `<button class="btn btn-danger-outline btn-sm" data-revoke-tutor-access="${b.id}">🚫 Revoke Access</button>`}
-          <select data-employment-status="${b.id}" style="padding:6px 8px; border:1.5px solid var(--line); border-radius:8px; font-size:11.5px; font-family:inherit;">
+          <select data-employment-status="${b.id}" style="padding:3px 4px; border:1.5px solid var(--line); border-radius:6px; font-size:10.5px; font-family:inherit; width:auto; max-width:78px;">
             <option value="active" selected>Active</option>
-            <option value="resigned">Mark Resigned</option>
-            <option value="terminated">Mark Terminated</option>
+            <option value="resigned">Resigned</option>
+            <option value="terminated">Terminated</option>
           </select>
         </div>
       </td>
@@ -3058,11 +3055,12 @@ function renderAdminTutorChats(){
   </div>`;
 }
 
-let formerTutorsSearchQuery = '';
+let formerTutorsSearchQuery = { resigned: '', terminated: '' };
 
-function renderAdminFormerTutors(){
-  const former = bookings.filter(b => b.tutorAccountCreated === true && isFormerTutor(b));
-  const q = formerTutorsSearchQuery.trim().toLowerCase();
+function renderAdminFormerTutors(status){
+  const label = status === 'terminated' ? 'Terminated' : 'Resigned';
+  const former = bookings.filter(b => b.tutorAccountCreated === true && b.tutorEmploymentStatus === status);
+  const q = formerTutorsSearchQuery[status].trim().toLowerCase();
   const filtered = q
     ? former.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.adminChatLabel||'').toLowerCase().includes(q))
     : former;
@@ -3074,18 +3072,15 @@ function renderAdminFormerTutors(){
   });
 
   const emptyMessage = former.length === 0
-    ? 'No resigned or terminated tutors on record.'
+    ? `No ${label.toLowerCase()} tutors on record.`
     : 'No one matches that search.';
 
-  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const displayLabel = b.adminChatLabel || b.fullName;
-    const statusLabel = b.tutorEmploymentStatus === 'terminated' ? 'Terminated' : 'Resigned';
-    const statusColor = b.tutorEmploymentStatus === 'terminated' ? 'var(--danger)' : 'var(--slate)';
     const dateStr = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
     return `
     <tr>
       <td><strong>${escapeHtml(displayLabel)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
-      <td><span style="color:${statusColor}; font-weight:700; font-size:12.5px;">${statusLabel}</span></td>
       <td class="tag">${dateStr}</td>
       <td>
         <div class="row-actions">
@@ -3099,10 +3094,10 @@ function renderAdminFormerTutors(){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <input type="text" id="formerTutorsSearchInput" placeholder="Search by name…" value="${escapeHtml(formerTutorsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <input type="text" id="formerTutorsSearchInput" data-status="${status}" placeholder="Search by name…" value="${escapeHtml(formerTutorsSearchQuery[status])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
     <table class="list-table">
-      <thead><tr><th>Tutor</th><th>Status</th><th>Date</th><th>Manage</th></tr></thead>
+      <thead><tr><th>Tutor</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -4625,29 +4620,6 @@ Langdy Team`;
           render();
         };
       });
-      $$('[data-revoke-tutor-access]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.revokeTutorAccess;
-          const idx = bookings.findIndex(x=>x.id===id);
-          if(idx === -1) return;
-          if(!confirm(`Revoke chat access for ${bookings[idx].fullName}? They'll no longer be able to sign in and see anything, but you can restore access later.`)) return;
-          const updated = Object.assign({}, bookings[idx], { tutorAccessRevoked: true });
-          const next = [...bookings]; next[idx] = updated;
-          await saveBookings(next);
-          render();
-        };
-      });
-      $$('[data-restore-tutor-access]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.restoreTutorAccess;
-          const idx = bookings.findIndex(x=>x.id===id);
-          if(idx === -1) return;
-          const updated = Object.assign({}, bookings[idx], { tutorAccessRevoked: false });
-          const next = [...bookings]; next[idx] = updated;
-          await saveBookings(next);
-          render();
-        };
-      });
       $$('[data-employment-status]').forEach(el=>{
         el.onchange = async () => {
           const id = el.dataset.employmentStatus;
@@ -4669,10 +4641,11 @@ Langdy Team`;
       });
     }
 
-    if(adminTab==='formerTutors'){
+    if(adminTab==='resignedTutors' || adminTab==='terminatedTutors'){
       const searchInput = $('#formerTutorsSearchInput');
       if(searchInput){
-        searchInput.oninput = e => { formerTutorsSearchQuery = e.target.value; render(); };
+        const statusKey = searchInput.dataset.status;
+        searchInput.oninput = e => { formerTutorsSearchQuery[statusKey] = e.target.value; render(); };
         searchInput.focus();
         searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
       }
@@ -5384,12 +5357,7 @@ Langdy Team`;
         if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
           await loadBookings();
           const match = bookings.find(b => (b.email||'').trim().toLowerCase() === (user.email||'').trim().toLowerCase() && b.tutorAccountCreated === true);
-          if(match && match.tutorAccessRevoked){
-            tutorLoginError = 'Your access has been disabled. Please contact the admin.';
-            gateMode = 'tutorLogin';
-            view = 'gate';
-            firebase.auth().signOut();
-          } else if(match){
+          if(match){
             tutorLoginError = '';
             bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
                    agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
