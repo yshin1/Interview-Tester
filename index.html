@@ -1300,7 +1300,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='formerTutors') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2078,7 +2078,8 @@ const TAB_GROUPS = [
   },
   { label: 'Chat', children: [
       ['chats','All Chats'],
-      ['tutorChats','Tutor Chats']
+      ['tutorChats','Tutor Chats'],
+      ['formerTutors','Resigned/Terminated']
     ]
   },
   { label: 'Forms', children: [
@@ -2119,6 +2120,7 @@ function renderAdmin(){
   else if(adminTab==='deviceSubmissions') body = renderAdminDeviceSubmissions();
   else if(adminTab==='chats') body = renderAdminChats();
   else if(adminTab==='tutorChats') body = renderAdminTutorChats();
+  else if(adminTab==='formerTutors') body = renderAdminFormerTutors();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
@@ -2972,8 +2974,12 @@ let tutorChatsFilterUnreadOnly = false;
 let editingTutorChatLabelId = null;
 let tutorChatLabelDraft = '';
 
+function isFormerTutor(b){
+  return b.tutorEmploymentStatus === 'resigned' || b.tutorEmploymentStatus === 'terminated';
+}
+
 function renderAdminTutorChats(){
-  const tutors = bookings.filter(b => b.tutorAccountCreated === true);
+  const tutors = bookings.filter(b => b.tutorAccountCreated === true && !isFormerTutor(b));
   const q = tutorChatsSearchQuery.trim().toLowerCase();
   let filtered = q
     ? tutors.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.adminChatLabel||'').toLowerCase().includes(q))
@@ -3026,6 +3032,11 @@ function renderAdminTutorChats(){
           ${revoked
             ? `<button class="btn btn-ghost btn-sm" data-restore-tutor-access="${b.id}">✓ Restore Access</button>`
             : `<button class="btn btn-danger-outline btn-sm" data-revoke-tutor-access="${b.id}">🚫 Revoke Access</button>`}
+          <select data-employment-status="${b.id}" style="padding:6px 8px; border:1.5px solid var(--line); border-radius:8px; font-size:11.5px; font-family:inherit;">
+            <option value="active" selected>Active</option>
+            <option value="resigned">Mark Resigned</option>
+            <option value="terminated">Mark Terminated</option>
+          </select>
         </div>
       </td>
     </tr>`;
@@ -3042,6 +3053,56 @@ function renderAdminTutorChats(){
     </div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+let formerTutorsSearchQuery = '';
+
+function renderAdminFormerTutors(){
+  const former = bookings.filter(b => b.tutorAccountCreated === true && isFormerTutor(b));
+  const q = formerTutorsSearchQuery.trim().toLowerCase();
+  const filtered = q
+    ? former.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.adminChatLabel||'').toLowerCase().includes(q))
+    : former;
+
+  const sorted = [...filtered].sort((a,b) => {
+    const ta = a.tutorEmploymentDate ? new Date(a.tutorEmploymentDate).getTime() : 0;
+    const tb = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).getTime() : 0;
+    return tb - ta; // most recently departed first
+  });
+
+  const emptyMessage = former.length === 0
+    ? 'No resigned or terminated tutors on record.'
+    : 'No one matches that search.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+    const displayLabel = b.adminChatLabel || b.fullName;
+    const statusLabel = b.tutorEmploymentStatus === 'terminated' ? 'Terminated' : 'Resigned';
+    const statusColor = b.tutorEmploymentStatus === 'terminated' ? 'var(--danger)' : 'var(--slate)';
+    const dateStr = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    return `
+    <tr>
+      <td><strong>${escapeHtml(displayLabel)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
+      <td><span style="color:${statusColor}; font-weight:700; font-size:12.5px;">${statusLabel}</span></td>
+      <td class="tag">${dateStr}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
+          <button class="btn btn-ghost btn-sm" data-reactivate-tutor="${b.id}">↩ Reactivate</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="formerTutorsSearchInput" placeholder="Search by name…" value="${escapeHtml(formerTutorsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    </div>
+    <table class="list-table">
+      <thead><tr><th>Tutor</th><th>Status</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -4584,6 +4645,55 @@ Langdy Team`;
           const updated = Object.assign({}, bookings[idx], { tutorAccessRevoked: false });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-employment-status]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.employmentStatus;
+          const status = el.value;
+          if(status === 'active') return;
+          const b = bookings.find(x=>x.id===id);
+          if(!b) return;
+          const label = status === 'terminated' ? 'terminated' : 'resigned';
+          if(!confirm(`Mark ${b.fullName} as ${label}? They'll move to the Resigned/Terminated tab, but can still chat with you — access isn't affected.`)){
+            el.value = 'active';
+            return;
+          }
+          const idx = bookings.findIndex(x=>x.id===id);
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: status, tutorEmploymentDate: new Date().toISOString() });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+    }
+
+    if(adminTab==='formerTutors'){
+      const searchInput = $('#formerTutorsSearchInput');
+      if(searchInput){
+        searchInput.oninput = e => { formerTutorsSearchQuery = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
+      $$('[data-reactivate-tutor]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.reactivateTutor;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          chatDraftText = '';
+          render();
+          await markChatReadByAdmin(id);
           render();
         };
       });
