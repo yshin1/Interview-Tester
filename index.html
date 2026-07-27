@@ -3015,6 +3015,15 @@ function isFormerTutor(b){
   return b.tutorEmploymentStatus === 'resigned' || b.tutorEmploymentStatus === 'terminated';
 }
 
+// True for any booking that's landed in the Archive tab — failed either demo
+// stage, or a tutor who resigned/was terminated. Used to let someone with a
+// past, concluded booking re-apply and re-book this cycle under the same
+// email, while still blocking a genuine duplicate of an active/in-progress
+// booking.
+function isArchivedBooking(b){
+  return b.demoResult === 'fail' || b.secondDemoResult === 'fail' || isFormerTutor(b);
+}
+
 function renderAdminTutorChats(){
   const tutors = bookings.filter(b => b.tutorAccountCreated === true && !isFormerTutor(b));
   const q = tutorChatsSearchQuery.trim().toLowerCase();
@@ -4097,7 +4106,7 @@ function attachHandlers(){
           try{
             await loadBookings();
             const emailNorm = bk.email.trim().toLowerCase();
-            const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm);
+            const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm && !isArchivedBooking(b));
             if(dupEmail){
               bk.busy=false; bk.error='This email address has already been used to book a slot. Only one booking is allowed per person.'; render(); return;
             }
