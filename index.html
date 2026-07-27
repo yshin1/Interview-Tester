@@ -841,6 +841,45 @@ const db = firebase.firestore();
 const fbStorage = firebase.storage();
 const KV_COLLECTION = 'kv';
 
+// Firebase Auth has no built-in "roles" without a backend (Admin SDK/custom
+// claims), so anyone who can successfully sign in — including an invited
+// tutor — could otherwise pass the ?admin login check too. This allowlist is
+// the only thing standing between "signed in" and "is actually the admin".
+// To add another admin, just add their email here (all lowercase).
+const ADMIN_EMAILS = ['yunsoo.shin@langdy.net'];
+function isAllowedAdminEmail(email){
+  return !!email && ADMIN_EMAILS.includes(email.trim().toLowerCase());
+}
+
+// Creates a Firebase Auth account for a passed tutor and returns the
+// temporary password, so the admin can send it themselves via a pre-filled
+// Gmail compose window — the same pattern already used for applicant
+// invites — instead of relying on Firebase's own transactional email, which
+// isn't reliably arriving.
+//
+// The tricky part: calling createUserWithEmailAndPassword on the normal auth
+// instance would sign the ADMIN out and sign in as the new tutor instead.
+// To avoid that, we spin up a throwaway secondary Firebase app just for this
+// one operation, then tear it down — the admin's own session never moves.
+function generateTutorTempPassword(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let pass = '';
+  for(let i=0; i<10; i++) pass += chars[Math.floor(Math.random()*chars.length)];
+  return pass;
+}
+async function inviteTutorAccount(email){
+  const secondaryApp = firebase.initializeApp(firebaseConfig, 'tutor-invite-' + Date.now());
+  const tempPassword = generateTutorTempPassword();
+  try{
+    const secondaryAuth = secondaryApp.auth();
+    await secondaryAuth.createUserWithEmailAndPassword(email, tempPassword);
+    await secondaryAuth.signOut();
+  } finally {
+    await secondaryApp.delete();
+  }
+  return tempPassword;
+}
+
 async function uploadApplicationFile(file, applicationId, fieldName){
   return uploadEntityFile(file, 'applications', applicationId, fieldName);
 }
@@ -1251,7 +1290,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -1483,24 +1522,26 @@ function render(){
   else if(view==='signupForm') app.innerHTML = renderSignupFormPage();
   else if(view==='deviceForm') app.innerHTML = renderDeviceFormPage();
   else if(view==='gate') app.innerHTML = renderGate();
-  else if(view==='book') app.innerHTML = renderTopbar(false) + renderBook();
-  else if(view==='admin') app.innerHTML = renderTopbar(true) + renderAdmin();
+  else if(view==='book') app.innerHTML = renderTopbar(currentTutorUser ? 'tutor' : 'applicant') + renderBook();
+  else if(view==='admin') app.innerHTML = renderTopbar('admin') + renderAdmin();
   attachHandlers();
 }
 
-function renderTopbar(isAdmin){
+function renderTopbar(mode){ // 'admin' | 'tutor' | 'applicant'
+  const isAdmin = mode === 'admin';
+  const isTutor = mode === 'tutor';
   return `
   <div class="topbar">
     <div class="brand">
       <div class="brand-mark">IV</div>
       <div>
         <div class="brand-name">Interview Scheduling</div>
-        <div class="brand-sub">${isAdmin ? 'Admin Console' : 'Applicant Booking'}</div>
+        <div class="brand-sub">${isAdmin ? 'Admin Console' : isTutor ? 'Tutor Chat' : 'Applicant Booking'}</div>
       </div>
     </div>
     <div class="right">
       ${isAdmin ? '<span class="badge-admin">ADMIN</span>' : ''}
-      <button class="link-btn" id="logoutBtn">${isAdmin ? 'Log Out' : 'Exit'}</button>
+      <button class="link-btn" id="logoutBtn">${(isAdmin || isTutor) ? 'Log Out' : 'Exit'}</button>
     </div>
   </div>`;
 }
@@ -1509,11 +1550,15 @@ function renderTopbar(isAdmin){
    Gate screen
    ============================================================ */
 
-let gateMode = 'code'; // 'code' | 'find' | 'adminLogin'
+let gateMode = 'code'; // 'code' | 'find' | 'adminLogin' | 'tutorLogin'
 // Remembers whether this visit came in via the dedicated ?admin link, so that
 // logging out lands back on the admin sign-in form instead of the plain
 // applicant access-code screen.
 let cameFromAdminLink = false;
+// Same idea for tutors who were invited to create a real account (?tutor
+// link) — logging out should return to the tutor login form, not the plain
+// applicant code screen.
+let cameFromTutorLink = false;
 
 // Firebase Authentication state for the admin. `currentAdminUser` mirrors
 // firebase.auth().currentUser and persists across reloads automatically
@@ -1523,7 +1568,16 @@ let adminLoginEmail = '';
 let adminLoginPassword = '';
 let adminLoginError = '';
 let adminLoginBusy = false;
+
+// Firebase Auth state for a signed-in tutor (a passed applicant who was
+// invited to create a real account, instead of re-entering their email every
+// time to find their chat).
+let currentTutorUser = null;
+let tutorLoginEmail = '';
+let tutorLoginError = '';
+let tutorLoginBusy = false;
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
+let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 
 async function loadAllAdminData(){
   await Promise.all([loadBookings(), loadApplications(), loadAccountSignups(), loadDeviceSubmissions()]);
@@ -1552,6 +1606,27 @@ function renderGate(){
         <button class="btn btn-primary" id="adminLoginSubmit" ${adminLoginBusy?'disabled':''}>${adminLoginBusy?'Signing in…':'Sign In'}</button>
         ${adminLoginError ? `<div class="error-text">${escapeHtml(adminLoginError)}</div>` : ''}
         <button class="find-link" id="gateSwitchToCodeFromAdmin" style="display:block; margin-top:14px;">← Back to access code</button>
+      </div>
+    </div>`;
+  }
+  if(gateMode === 'tutorLogin'){
+    return `
+    <div class="center-screen">
+      <div class="card gate-card">
+        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <h1 class="gate-title">Tutor Sign In</h1>
+        <p class="gate-sub">Sign in with the email and password you set up to see your chat.</p>
+        <div class="field">
+          <label for="tutorLoginEmailInput">Email</label>
+          <input type="email" id="tutorLoginEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(tutorLoginEmail)}" ${tutorLoginBusy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorLoginPasswordInput">Password</label>
+          <input type="password" id="tutorLoginPasswordInput" placeholder="Password" autocomplete="current-password" ${tutorLoginBusy?'disabled':''}>
+        </div>
+        <button class="btn btn-primary" id="tutorLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
+        ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
+        <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:14px;">← Back to access code</button>
       </div>
     </div>`;
   }
@@ -1898,9 +1973,12 @@ function renderStepInfo(){
 }
 
 function renderBookDone(){
+  const isTutorSession = !!currentTutorUser;
+  const p = tutorChangePasswordState;
   return `
   <div class="main-wrap">
     <div class="card">
+      ${isTutorSession ? '' : `
       <div class="ticket">
         <div class="ticket-eyebrow">Booking Confirmed · Interview Slip</div>
         <div class="ticket-name">${escapeHtml(bk.fullName)}</div>
@@ -1908,18 +1986,36 @@ function renderBookDone(){
         <div class="ticket-row"><span class="k">Time</span><span class="v">${bk.time} PH time</span></div>
         <div class="ticket-row"><span class="k">Email</span><span class="v" style="font-size:12.5px;">${escapeHtml(bk.email)}</span></div>
       </div>
-
       <h3 style="font-size:16px; font-weight:800; margin:26px 0 4px;">One last step: confirm your booking</h3>
-      <p style="font-size:13px; color:var(--slate); margin:0 0 12px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>
+      <p style="font-size:13px; color:var(--slate); margin:0 0 12px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>`}
 
       ${renderChatPanel(bk.id, 'applicant')}
 
+      ${isTutorSession ? `
+      <div class="card" style="margin-top:20px; background:#FAFBFC;">
+        <div class="section-title" style="font-size:13.5px;">Change Password</div>
+        <div class="field">
+          <label>Current Password</label>
+          <input type="password" id="tcpCurrentInput" placeholder="Enter your current password" value="${escapeHtml(p.currentPassword)}" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label>New Password</label>
+          <input type="password" id="tcpNewInput" placeholder="At least 6 characters" value="${escapeHtml(p.newPassword)}" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm New Password</label>
+          <input type="password" id="tcpConfirmInput" placeholder="Re-enter new password" value="${escapeHtml(p.confirmPassword)}" autocomplete="new-password">
+        </div>
+        ${p.error ? `<div class="error-text">${escapeHtml(p.error)}</div>` : ''}
+        ${p.success ? `<div class="success-text">${escapeHtml(p.success)}</div>` : ''}
+        <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorChangePasswordBtn" ${p.busy?'disabled':''}>${p.busy?'Saving…':'Change Password'}</button>
+      </div>` : `
       <div class="warn-box strong" style="margin-top:16px;">
         <div class="icon">⏰</div>
         <div class="txt">If we do not receive a message from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled.</div>
       </div>
       <p class="hint" style="margin-top:10px;">Want to come back to this chat later? Use "Already booked? Find your chat" on the main entry page — you'll just need the email you booked with.</p>
-      <button class="btn btn-ghost" style="margin-top:16px;" id="doneClose">Done</button>
+      <button class="btn btn-ghost" style="margin-top:16px;" id="doneClose">Done</button>`}
     </div>
   </div>`;
 }
@@ -1957,7 +2053,11 @@ const TAB_GROUPS = [
       ['deviceSubmissions','Device']
     ]
   },
-  { label: 'Chat', tab: 'chats' },
+  { label: 'Chat', children: [
+      ['chats','All Chats'],
+      ['tutorChats','Tutor Chats']
+    ]
+  },
   { label: 'Forms', children: [
       ['formBuilderApply','Apply Form'],
       ['formBuilderDevice','Device Form'],
@@ -1995,6 +2095,7 @@ function renderAdmin(){
   else if(adminTab==='accountSignups') body = renderAdminAccountSignups();
   else if(adminTab==='deviceSubmissions') body = renderAdminDeviceSubmissions();
   else if(adminTab==='chats') body = renderAdminChats();
+  else if(adminTab==='tutorChats') body = renderAdminTutorChats();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
@@ -2826,6 +2927,65 @@ function renderAdminChats(){
   </div>`;
 }
 
+let tutorChatsSearchQuery = '';
+let tutorChatsFilterUnreadOnly = false;
+
+function renderAdminTutorChats(){
+  const tutors = bookings.filter(b => b.tutorAccountCreated === true);
+  const q = tutorChatsSearchQuery.trim().toLowerCase();
+  let filtered = q
+    ? tutors.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q))
+    : tutors;
+  if(tutorChatsFilterUnreadOnly) filtered = filtered.filter(b => unreadCountForAdmin(b) > 0);
+
+  const totalUnreadThreads = tutors.filter(b => unreadCountForAdmin(b) > 0).length;
+
+  const sorted = [...filtered].sort((a,b) => {
+    const la = lastMessageInfo(a); const lb = lastMessageInfo(b);
+    const ta = la ? new Date(la.at).getTime() : 0;
+    const tb = lb ? new Date(lb.at).getTime() : 0;
+    return tb - ta; // most recent activity first
+  });
+
+  const emptyMessage = tutors.length === 0
+    ? 'No tutor accounts yet. Invite a passed tutor from the Onboarding tab to get started.'
+    : q
+      ? 'No tutors match that search.'
+      : 'No unread messages.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="5" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+    const last = lastMessageInfo(b);
+    const unread = unreadCountForAdmin(b);
+    const who = last ? (last.from === 'admin' ? 'You' : b.fullName) : '';
+    const preview = last ? (last.text.length > 60 ? last.text.slice(0,60)+'…' : last.text) : 'No messages yet';
+    return `
+    <tr>
+      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
+      <td style="max-width:340px;">
+        ${last ? `<span style="font-weight:${unread>0?'700':'400'};">${escapeHtml(who)}:</span> <span style="color:${unread>0?'var(--ink)':'var(--slate)'};">${escapeHtml(preview)}</span>` : `<span style="color:var(--slate-light);">${preview}</span>`}
+      </td>
+      <td class="tag">${last ? new Date(last.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—'}</td>
+      <td>${unread>0 ? `<span class="unread-badge">${unread}</span>` : ''}</td>
+      <td><button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="tutorChatsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(tutorChatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <label class="checkbox-item" style="cursor:pointer; white-space:nowrap;">
+        <input type="checkbox" id="tutorChatsUnreadOnlyToggle" ${tutorChatsFilterUnreadOnly?'checked':''}>
+        Unread only (${totalUnreadThreads})
+      </label>
+    </div>
+    <table class="list-table">
+      <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 
 function renderAdminSecondDemo(){
   const passed = bookings.filter(b => b.demoResult === 'pass' && b.secondDemoResult !== 'pass'); // 2nd-demo-passers move to Onboarding only
@@ -3030,6 +3190,9 @@ function renderAdminOnboarding(){
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unreadCountForAdmin(b)>0?`<span class="unread-badge">${unreadCountForAdmin(b)}</span>`:''}</button>
           <button class="btn btn-ghost btn-sm" data-notes-id="${b.id}">📝 Notes${b.notes?' •':''}</button>
           <button class="btn btn-ghost btn-sm" data-signup-status-id="${b.id}">📋 Status</button>
+          ${b.tutorAccountCreated
+            ? `<span style="font-size:11px; color:var(--success); font-weight:700; white-space:nowrap;">✓ Invited</span>`
+            : `<button class="btn btn-primary btn-sm" data-invite-tutor-id="${b.id}">📧 Invite</button>`}
         </div>
       </td>
     </tr>`).join('');
@@ -3360,10 +3523,10 @@ function attachHandlers(){
     stopSignupsPolling();
     stopDevicePolling();
     stopBookingsPolling();
-    if(currentAdminUser){
-      // Real admin session — actually sign out of Firebase, not just reset
-      // the view. onAuthStateChanged (set up in init) picks up the sign-out
-      // and handles switching back to the gate screen.
+    if(currentAdminUser || currentTutorUser){
+      // Real admin or tutor session — actually sign out of Firebase, not
+      // just reset the view. onAuthStateChanged (set up in init) picks up
+      // the sign-out and handles switching back to the right gate screen.
       try{ await firebase.auth().signOut(); }catch(e){ console.error('Sign out failed:', e); }
       return;
     }
@@ -3614,6 +3777,43 @@ function attachHandlers(){
       (adminLoginEmail ? $('#adminLoginPasswordInput') : $('#adminLoginEmailInput')).focus();
       const backLink = $('#gateSwitchToCodeFromAdmin');
       if(backLink) backLink.onclick = () => { gateMode='code'; adminLoginError=''; render(); };
+    } else if(gateMode==='tutorLogin'){
+      const submit = async () => {
+        const email = $('#tutorLoginEmailInput').value.trim();
+        const password = $('#tutorLoginPasswordInput').value;
+        if(!email || !password){ tutorLoginError='Please enter your email and password.'; render(); return; }
+        tutorLoginBusy = true; tutorLoginError=''; tutorLoginEmail = email; render();
+        let timedOut = false;
+        const signInTimeoutId = setTimeout(() => {
+          timedOut = true;
+          tutorLoginBusy = false;
+          tutorLoginError = 'This is taking too long. Check your internet connection and try again.';
+          render();
+        }, 15000);
+        try{
+          await firebase.auth().signInWithEmailAndPassword(email, password);
+          clearTimeout(signInTimeoutId);
+          if(timedOut) return;
+          // onAuthStateChanged (set up in init) picks up the signed-in user,
+          // finds their booking, and switches to the chat view.
+        }catch(e){
+          clearTimeout(signInTimeoutId);
+          if(timedOut) return;
+          tutorLoginBusy = false;
+          const friendly = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
+            ? 'Incorrect email or password.'
+            : 'Something went wrong signing in. Please try again.';
+          tutorLoginError = `${friendly} (${e.code || 'unknown error'})`;
+          console.error('TUTOR LOGIN ERROR:', e);
+          render();
+        }
+      };
+      $('#tutorLoginSubmit').onclick = submit;
+      $('#tutorLoginPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#tutorLoginEmailInput').oninput = e => { tutorLoginEmail = e.target.value; };
+      (tutorLoginEmail ? $('#tutorLoginPasswordInput') : $('#tutorLoginEmailInput')).focus();
+      const tutorBackLink = $('#gateSwitchToCodeFromTutor');
+      if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; render(); };
     } else {
       const submit = async () => {
         const email = $('#findEmailInput').value.trim();
@@ -3778,6 +3978,40 @@ function attachHandlers(){
       bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
       render();
     };
+    const tcpCurrentInput = $('#tcpCurrentInput');
+    if(tcpCurrentInput){
+      tcpCurrentInput.oninput = e => { tutorChangePasswordState.currentPassword = e.target.value; };
+      $('#tcpNewInput').oninput = e => { tutorChangePasswordState.newPassword = e.target.value; };
+      $('#tcpConfirmInput').oninput = e => { tutorChangePasswordState.confirmPassword = e.target.value; };
+      $('#tutorChangePasswordBtn').onclick = async () => {
+        const p = tutorChangePasswordState;
+        p.error=''; p.success='';
+        if(!p.currentPassword || !p.newPassword || !p.confirmPassword){
+          p.error = 'Please fill in all three password fields.'; render(); return;
+        }
+        if(p.newPassword.length < 6){
+          p.error = 'New password must be at least 6 characters.'; render(); return;
+        }
+        if(p.newPassword !== p.confirmPassword){
+          p.error = 'New password and confirmation do not match.'; render(); return;
+        }
+        p.busy = true; render();
+        try{
+          const user = currentTutorUser;
+          const credential = firebase.auth.EmailAuthProvider.credential(user.email, p.currentPassword);
+          await user.reauthenticateWithCredential(credential);
+          await user.updatePassword(p.newPassword);
+          p.busy=false; p.success='Password changed successfully.'; p.currentPassword=''; p.newPassword=''; p.confirmPassword='';
+          render();
+        }catch(e){
+          p.busy=false;
+          p.error = (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential')
+            ? 'Your current password is incorrect.'
+            : 'Something went wrong changing your password. Please try again.';
+          render();
+        }
+      };
+    }
   }
 
   if(view==='admin'){
@@ -4171,6 +4405,27 @@ Langdy Team`;
       });
     }
 
+    if(adminTab==='tutorChats'){
+      const searchInput = $('#tutorChatsSearchInput');
+      if(searchInput){
+        searchInput.oninput = e => { tutorChatsSearchQuery = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
+      const toggle = $('#tutorChatsUnreadOnlyToggle');
+      if(toggle) toggle.onchange = () => { tutorChatsFilterUnreadOnly = toggle.checked; render(); };
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          chatDraftText = '';
+          render();
+          await markChatReadByAdmin(id);
+          render();
+        };
+      });
+    }
+
     if(adminTab==='secondDemo'){
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
@@ -4359,6 +4614,44 @@ Langdy Team`;
       }
       $$('[data-signup-status-id]').forEach(el=>{
         el.onclick = () => { signupStatusTarget = el.dataset.signupStatusId; render(); };
+      });
+      $$('[data-invite-tutor-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.inviteTutorId;
+          const b = bookings.find(x=>x.id===id);
+          if(!b || !b.email) return;
+          el.disabled = true; el.textContent = 'Inviting…';
+          try{
+            const tempPassword = await inviteTutorAccount(b.email);
+            const idx = bookings.findIndex(x=>x.id===id);
+            const updated = Object.assign({}, bookings[idx], { tutorAccountCreated: true });
+            const next = [...bookings]; next[idx] = updated;
+            await saveBookings(next);
+            const tutorLoginLink = window.location.origin + window.location.pathname + '?tutor';
+            const subject = "Your Langdy chat account is ready";
+            const body = `Hi ${b.fullName},
+
+We've set up an account so you can chat with us directly on the site from now on, instead of KakaoTalk.
+
+Login link: ${tutorLoginLink}
+Email: ${b.email}
+Temporary password: ${tempPassword}
+
+Please log in and feel free to change your password once you're in (under your account settings).
+
+Best,
+Langdy Team`;
+            const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(b.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+            window.open(gmailUrl, '_blank');
+            render();
+          }catch(e){
+            console.error('INVITE TUTOR ERROR:', e);
+            el.disabled = false; el.textContent = '📧 Invite';
+            alert(e.code === 'auth/email-already-in-use'
+              ? 'An account already exists for this email.'
+              : 'Something went wrong creating the account. Please try again.');
+          }
+        };
       });
       if(signupStatusTarget){
         $('#signupStatusCloseBtn').onclick = () => { signupStatusTarget=null; render(); };
@@ -4715,6 +5008,7 @@ Langdy Team`;
   else if(params.has('signup')) view = 'signupForm';
   else if(params.has('device')) view = 'deviceForm';
   else if(params.has('admin')){ gateMode = 'adminLogin'; cameFromAdminLink = true; }
+  else if(params.has('tutor')){ gateMode = 'tutorLogin'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
   // Firebase persists the signed-in admin across reloads by default, so this
@@ -4727,8 +5021,53 @@ Langdy Team`;
     firebase.auth().onAuthStateChanged(async (user) => {
       const isInitialCheck = !authInitialCheckDone;
       authInitialCheckDone = true;
-      currentAdminUser = user;
-      if(user){
+
+      if(cameFromTutorLink){
+        currentTutorUser = user;
+        if(user){
+          tutorLoginBusy = false;
+          if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
+            await loadBookings();
+            const match = bookings.find(b => (b.email||'').trim().toLowerCase() === (user.email||'').trim().toLowerCase());
+            if(match){
+              tutorLoginError = '';
+              bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
+                     agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
+              view = 'book';
+            } else {
+              tutorLoginError = "Signed in, but couldn't find a booking under this email. Please contact the admin.";
+              gateMode = 'tutorLogin';
+              view = 'gate';
+              firebase.auth().signOut(); // no matching booking — don't stay signed in with nowhere to go
+            }
+          }
+        } else {
+          tutorLoginBusy = false;
+          if(!isInitialCheck && !tutorLoginError) gateMode = 'tutorLogin';
+          if(view === 'book') view = 'gate';
+        }
+        render();
+        return;
+      }
+
+      const isRealAdmin = !!user && isAllowedAdminEmail(user.email);
+      currentAdminUser = isRealAdmin ? user : null;
+
+      if(user && !isRealAdmin && cameFromAdminLink){
+        // They successfully authenticated with Firebase, but this email
+        // isn't on the admin allowlist — e.g. an invited tutor tried their
+        // own credentials on the ?admin link. Authentication succeeding is
+        // NOT the same as being authorized, so never grant admin access
+        // here; sign them back out immediately.
+        adminLoginBusy = false;
+        adminLoginError = "This account doesn't have admin access.";
+        gateMode = 'adminLogin';
+        firebase.auth().signOut();
+        render();
+        return;
+      }
+
+      if(isRealAdmin){
         adminLoginBusy = false; adminLoginError = ''; gateMode = 'code';
         // Only auto-jump to the admin dashboard when this pageview came in
         // through the dedicated ?admin link (or we're already there this
@@ -4745,7 +5084,11 @@ Langdy Team`;
           view = 'admin';
         }
       } else {
-        adminLoginBusy = false; adminLoginError = '';
+        adminLoginBusy = false;
+        // (Don't blindly clear adminLoginError here — if it was just set by
+        // the not-an-admin rejection above, this callback fires again right
+        // after that forced signOut(), and clearing it would wipe the
+        // message before the person ever sees it.)
         // On a real sign-out (not the very first check on page load), go
         // back to the admin sign-in form if this session started from the
         // ?admin link — otherwise the plain applicant access-code screen.
