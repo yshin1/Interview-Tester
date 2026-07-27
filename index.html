@@ -373,18 +373,6 @@ function migrateSchemaFieldDescriptions(schema){
   });
 }
 
-// One-time-per-load migration: the canonical email field (id:'email') used
-// to be a plain 'text' field, which meant it could silently lose its email
-// validation/recognition if edited. Auto-upgrades any existing saved schema
-// so the email field is always the dedicated 'email' type going forward,
-// without admins needing to manually fix already-saved forms.
-function migrateEmailFieldType(schema){
-  return (schema || []).map(field => {
-    if(field.id === 'email' && field.type === 'text') return Object.assign({}, field, { type: 'email' });
-    return field;
-  });
-}
-
 async function loadFormSchemas(){
   try{
     const res = await storage.get(FORM_SCHEMAS_KEY);
@@ -397,9 +385,9 @@ async function loadFormSchemas(){
     formSchemas.device = DEVICE_FORM_DEFAULT_SCHEMA;
     formSchemas.signup = SIGNUP_FORM_DEFAULT_SCHEMA;
   }
-  formSchemas.apply = migrateSchemaFieldDescriptions(migrateEmailFieldType(formSchemas.apply));
+  formSchemas.apply = migrateSchemaFieldDescriptions(formSchemas.apply);
   formSchemas.device = migrateSchemaFieldDescriptions(formSchemas.device);
-  formSchemas.signup = migrateSchemaFieldDescriptions(migrateEmailFieldType(formSchemas.signup));
+  formSchemas.signup = migrateSchemaFieldDescriptions(formSchemas.signup);
   return formSchemas;
 }
 async function saveFormSchemas(){
@@ -3569,7 +3557,7 @@ function getFormBuilderDraft(formKey){
   if(!formBuilderDraft[formKey]){
     const base = formSchemas[formKey] || getDefaultSchemaFor(formKey);
     const normalizedTypes = JSON.parse(JSON.stringify(base)).map(f => f.type==='textarea' ? Object.assign({}, f, {type:'text'}) : f);
-    formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(migrateEmailFieldType(normalizedTypes));
+    formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(normalizedTypes);
   }
   return formBuilderDraft[formKey];
 }
@@ -3607,7 +3595,7 @@ function renderFormBuilder(formKey){
     <div class="card" style="margin-bottom:10px; padding:14px;">
       <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <span style="flex-shrink:0; width:28px; height:36px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--slate-light);">#${i+1}</span>
-        <select data-fb-type="${i}" ${field.id==='email'?'disabled title="The email field\'s type is locked so it always stays recognized and validated as an email."':''} style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit; ${field.id==='email'?'opacity:0.6; cursor:not-allowed;':''}">
+        <select data-fb-type="${i}" style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
           ${Object.entries(FIELD_TYPE_LABELS).map(([t,label])=>`<option value="${t}" ${field.type===t?'selected':''}>${label}</option>`).join('')}
         </select>
         <textarea data-fb-label="${i}" placeholder="Label / question text" rows="1" style="flex:1; min-width:220px; resize:vertical; padding:9px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit;">${escapeHtml(field.label)}</textarea>
