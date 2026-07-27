@@ -2408,8 +2408,38 @@ function renderAdminApplications(){
 
 function renderApplicationDetailModal(){
   const a = applications.find(x => x.id === applicationDetailTarget) || {};
-  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
-  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+  const schema = formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA;
+  const row = (label, val) => `<div class="ticket-row"><span class="k">${escapeHtml(label)}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${escapeHtml(label)}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+
+  // Driven by the CURRENT Apply Form schema (not a fixed field list) so this
+  // always matches whatever the admin has set up in Form Builder — no risk
+  // of a stale hardcoded row silently showing the wrong field's value.
+  const fieldsHtml = schema
+    .filter(field => field.type !== 'section' && field.type !== 'image' && field.id !== 'fullName' && field.id !== 'email')
+    .map(field => {
+      const val = a[field.id];
+      if(field.type === 'file'){
+        const url = a[field.id+'Url'];
+        if(field.id === 'recording'){
+          return url ? `
+          <div class="field">
+            <label>${escapeHtml(field.label)}</label>
+            <audio controls src="${escapeHtml(url)}" style="width:100%;"></audio>
+          </div>` : `<div class="ticket-row"><span class="k">${escapeHtml(field.label)}</span><span class="v">—</span></div>`;
+        }
+        return linkRow(field.label, url);
+      }
+      if(field.id === 'teachingExperience' || (typeof val === 'string' && val.length > 80)){
+        return val ? `
+        <div class="field">
+          <label>${escapeHtml(field.label)}</label>
+          <div style="white-space:pre-wrap; font-size:13.5px; line-height:1.6; margin-top:4px;">${escapeHtml(val)}</div>
+        </div>` : row(field.label, val);
+      }
+      return row(field.label, val);
+    }).join('');
+
   return `
   <div class="modal-overlay" id="appDetailOverlay">
     <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
@@ -2429,35 +2459,7 @@ function renderApplicationDetailModal(){
       <div class="divider"></div>
 
       ${row('Email', a.email)}
-      ${row('Reference', a.reference)}
-      ${row('Platform', a.platform)}
-      ${row('Worked at Langdy before', a.workedBefore)}
-      ${row('Interviewed before', a.interviewedBefore)}
-      ${row('Education', a.education)}
-      ${row('Certification', a.certification)}
-      ${linkRow('Verification image', a.verificationImageUrl)}
-      ${row('Weekdays 5:30–8:30 AM', a.weekdayMorning)}
-      ${row('Weekdays 17:00–23:00', a.weekdayEvening)}
-      ${row('Weekends (3+ hrs)', a.weekend)}
-      ${row('KakaoTalk ID', a.kakaoId)}
-      ${a.teachingExperience ? `
-      <div class="field">
-        <label>Teaching experience</label>
-        <div style="white-space:pre-wrap; font-size:13.5px; line-height:1.6; margin-top:4px;">${escapeHtml(a.teachingExperience)}</div>
-      </div>
-      ` : row('Teaching experience', a.teachingExperience)}
-      ${a.recordingUrl ? `
-      <div class="field">
-        <label>Voice Recording</label>
-        <audio controls src="${escapeHtml(a.recordingUrl)}" style="width:100%;"></audio>
-      </div>` : `<div class="ticket-row"><span class="k">Voice Recording</span><span class="v">—</span></div>`}
-      ${row('Internet type', a.internetType)}
-      ${row('Backup internet', a.backupInternet)}
-      ${row('Computer option', a.computerOption)}
-      ${row('Desktop backup power', a.desktopBackupPower)}
-      ${row('Laptop duration', a.laptopDuration)}
-      ${row('Laptop backup power', a.laptopBackupPower)}
-      ${row('Laptop backup duration', a.laptopBackupDuration)}
+      ${fieldsHtml}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="appDetailCloseBtn">Close</button>
       </div>
@@ -3846,6 +3848,9 @@ function attachHandlers(){
       if(emailField && !(state.answers[emailField.id]||'').trim()){
         state.error = 'Please fill in your email.'; render(); return;
       }
+      if(emailField && !isValidEmail((state.answers[emailField.id]||'').trim())){
+        state.error = 'Please enter a valid email address (e.g. name@example.com).'; render(); return;
+      }
       state.busy = true; render();
       try{
         await loadApplications();
@@ -3912,6 +3917,9 @@ function attachHandlers(){
       }
       if(emailField && !(state.answers[emailField.id]||'').trim()){
         state.error = 'Please fill in your email.'; render(); return;
+      }
+      if(emailField && !isValidEmail((state.answers[emailField.id]||'').trim())){
+        state.error = 'Please enter a valid email address (e.g. name@example.com).'; render(); return;
       }
       const checkboxFields = schema.filter(f=>f.type==='checkbox');
       const uncheckedRequired = checkboxFields.find(f => !state.answers[f.id]);
