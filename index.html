@@ -373,6 +373,18 @@ function migrateSchemaFieldDescriptions(schema){
   });
 }
 
+// One-time-per-load migration: the canonical email field (id:'email') used
+// to be a plain 'text' field, which meant it could silently lose its email
+// validation/recognition if edited. Auto-upgrades any existing saved schema
+// so the email field is always the dedicated 'email' type going forward,
+// without admins needing to manually fix already-saved forms.
+function migrateEmailFieldType(schema){
+  return (schema || []).map(field => {
+    if(field.id === 'email' && field.type === 'text') return Object.assign({}, field, { type: 'email' });
+    return field;
+  });
+}
+
 async function loadFormSchemas(){
   try{
     const res = await storage.get(FORM_SCHEMAS_KEY);
@@ -385,9 +397,9 @@ async function loadFormSchemas(){
     formSchemas.device = DEVICE_FORM_DEFAULT_SCHEMA;
     formSchemas.signup = SIGNUP_FORM_DEFAULT_SCHEMA;
   }
-  formSchemas.apply = migrateSchemaFieldDescriptions(formSchemas.apply);
+  formSchemas.apply = migrateSchemaFieldDescriptions(migrateEmailFieldType(formSchemas.apply));
   formSchemas.device = migrateSchemaFieldDescriptions(formSchemas.device);
-  formSchemas.signup = migrateSchemaFieldDescriptions(formSchemas.signup);
+  formSchemas.signup = migrateSchemaFieldDescriptions(migrateEmailFieldType(formSchemas.signup));
   return formSchemas;
 }
 async function saveFormSchemas(){
@@ -614,7 +626,7 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'platform', type:'text', label:'How did you hear about us?'},
   {id:'workedBefore', type:'yesno', label:'Worked at Langdy before'},
   {id:'interviewedBefore', type:'yesno', label:'Interviewed before'},
-  {id:'email', type:'text', label:'Email Address'},
+  {id:'email', type:'email', label:'Email Address'},
   {id:'section_background', type:'section', label:'Background'},
   {id:'education', type:'select', label:'Education', options: EDUCATION_OPTIONS},
   {id:'certification', type:'text', label:'Certification'},
@@ -677,7 +689,7 @@ const SIGNUP_FORM_DEFAULT_SCHEMA = [
   {id:'section_basic', type:'section', label:'Basic Information'},
   {id:'tutorName', type:'text', label:'Enter your Langdy tutor name.'},
   {id:'govId', type:'file', label:'Submit a copy of your government-issued ID (e.g. passport, national identity card) as an image file.'},
-  {id:'email', type:'text', label:'Enter your email address.'},
+  {id:'email', type:'email', label:'Enter your email address.'},
   {id:'residence', type:'text', label:'Enter your current city and country of residence.'},
   {id:'section_kakao', type:'section', label:'KakaoTalk'},
   {id:'kakaoId', type:'text', label:'Enter your KakaoTalk ID.'},
@@ -1722,6 +1734,8 @@ function renderDynamicField(formKey, field, value, fileName){
     case 'text':
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
       return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="3" style="resize:vertical; min-height:66px;">${escapeHtml(value||'')}</textarea></div>`;
+    case 'email':
+      return `<div class="field">${labelBlock}<input type="email" id="${idAttr}" placeholder="name@example.com" value="${escapeHtml(value||'')}"></div>`;
     case 'select':
       return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
     case 'yesno':
@@ -3555,7 +3569,7 @@ function getFormBuilderDraft(formKey){
   if(!formBuilderDraft[formKey]){
     const base = formSchemas[formKey] || getDefaultSchemaFor(formKey);
     const normalizedTypes = JSON.parse(JSON.stringify(base)).map(f => f.type==='textarea' ? Object.assign({}, f, {type:'text'}) : f);
-    formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(normalizedTypes);
+    formBuilderDraft[formKey] = migrateSchemaFieldDescriptions(migrateEmailFieldType(normalizedTypes));
   }
   return formBuilderDraft[formKey];
 }
@@ -3563,6 +3577,7 @@ function getFormBuilderDraft(formKey){
 const FIELD_TYPE_LABELS = {
   section: 'Section header',
   text: 'Text',
+  email: 'Email',
   select: 'Dropdown',
   yesno: 'Yes / No',
   file: 'File upload',
@@ -3592,7 +3607,7 @@ function renderFormBuilder(formKey){
     <div class="card" style="margin-bottom:10px; padding:14px;">
       <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
         <span style="flex-shrink:0; width:28px; height:36px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--slate-light);">#${i+1}</span>
-        <select data-fb-type="${i}" style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
+        <select data-fb-type="${i}" ${field.id==='email'?'disabled title="The email field\'s type is locked so it always stays recognized and validated as an email."':''} style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit; ${field.id==='email'?'opacity:0.6; cursor:not-allowed;':''}">
           ${Object.entries(FIELD_TYPE_LABELS).map(([t,label])=>`<option value="${t}" ${field.type===t?'selected':''}>${label}</option>`).join('')}
         </select>
         <textarea data-fb-label="${i}" placeholder="Label / question text" rows="1" style="flex:1; min-width:220px; resize:vertical; padding:9px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit;">${escapeHtml(field.label)}</textarea>
@@ -3631,6 +3646,7 @@ function renderFormBuilder(formKey){
     <div style="display:flex; gap:8px; align-items:center; margin:16px 0;">
       <select id="fbNewFieldType" style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
         <option value="text">Text</option>
+        <option value="email">Email</option>
         <option value="select">Dropdown</option>
         <option value="yesno">Yes / No</option>
         <option value="file">File upload</option>
@@ -3841,7 +3857,7 @@ function attachHandlers(){
     if(submitBtn) submitBtn.onclick = async () => {
       state.error = '';
       const nameField = schema.find(f=>f.id==='fullName');
-      const emailField = schema.find(f=>f.id==='email');
+      const emailField = schema.find(f=>f.type==='email') || schema.find(f=>f.id==='email');
       if(nameField && !(state.answers[nameField.id]||'').trim()){
         state.error = 'Please fill in at least your full name.'; render(); return;
       }
@@ -3911,7 +3927,7 @@ function attachHandlers(){
     if(submitBtn) submitBtn.onclick = async () => {
       state.error = '';
       const nameField = schema.find(f=>f.id==='tutorName');
-      const emailField = schema.find(f=>f.id==='email');
+      const emailField = schema.find(f=>f.type==='email') || schema.find(f=>f.id==='email');
       if(nameField && !(state.answers[nameField.id]||'').trim()){
         state.error = 'Please fill in at least your tutor name.'; render(); return;
       }
