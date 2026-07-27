@@ -2341,17 +2341,19 @@ let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
 
 function renderAdminApplications(){
   const shareLinkBox = renderShareLinkBox('apply', 'Application link');
-  if(applications.length === 0){
+  // Failed applications move to Archive automatically and no longer clutter
+  // the active pipeline here — they're still fully viewable under Archive →
+  // Application.
+  const activeApplications = applications.filter(a => !isArchivedApplication(a));
+  if(activeApplications.length === 0){
     return `<div class="card">${shareLinkBox}<div class="empty-state">No applications yet.</div></div>`;
   }
-  let filtered = applications;
+  let filtered = activeApplications;
   if(applicationFilterWorked!=='all') filtered = filtered.filter(a => (a.workedBefore||'')===applicationFilterWorked);
   if(applicationFilterInvited==='invited') filtered = filtered.filter(a => !!a.invited);
   if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
-  if(applicationFilterResult!=='all'){
-    if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
-    else filtered = filtered.filter(a => a.result===applicationFilterResult);
-  }
+  if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
+  else if(applicationFilterResult==='pass') filtered = filtered.filter(a => a.result==='pass');
   const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
 
   const rows = sorted.length===0 ? `<tr><td colspan="8" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => `
@@ -2378,25 +2380,25 @@ function renderAdminApplications(){
   <div class="card">
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
+    <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="all" ${applicationFilterWorked==='all'?'selected':''}>All (${applications.length})</option>
-        <option value="Yes" ${applicationFilterWorked==='Yes'?'selected':''}>Yes (${applications.filter(a=>a.workedBefore==='Yes').length})</option>
-        <option value="No" ${applicationFilterWorked==='No'?'selected':''}>No (${applications.filter(a=>a.workedBefore==='No').length})</option>
+        <option value="all" ${applicationFilterWorked==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="Yes" ${applicationFilterWorked==='Yes'?'selected':''}>Yes (${activeApplications.filter(a=>a.workedBefore==='Yes').length})</option>
+        <option value="No" ${applicationFilterWorked==='No'?'selected':''}>No (${activeApplications.filter(a=>a.workedBefore==='No').length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Invited</label>
       <select id="appFilterInvited" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${applications.length})</option>
-        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${applications.filter(a=>a.invited).length})</option>
-        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${applications.filter(a=>!a.invited).length})</option>
+        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${activeApplications.filter(a=>a.invited).length})</option>
+        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${activeApplications.filter(a=>!a.invited).length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Result</label>
       <select id="appFilterResult" style="max-width:160px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${applications.length})</option>
-        <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${applications.filter(a=>a.result==='pass').length})</option>
-        <option value="fail" ${applicationFilterResult==='fail'?'selected':''}>Fail (${applications.filter(a=>a.result==='fail').length})</option>
-        <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${applications.filter(a=>!a.result).length})</option>
+        <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
+        <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
       </select>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
     </div>
