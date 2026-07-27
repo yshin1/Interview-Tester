@@ -3671,13 +3671,13 @@ function renderFormBuilder(formKey){
         <select data-fb-type="${i}" style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
           ${Object.entries(FIELD_TYPE_LABELS).map(([t,label])=>`<option value="${t}" ${field.type===t?'selected':''}>${label}</option>`).join('')}
         </select>
-        <textarea data-fb-label="${i}" placeholder="Label / question text" rows="1" style="flex:1; min-width:220px; resize:vertical; padding:9px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit;">${escapeHtml(field.label)}</textarea>
+        <textarea data-fb-label="${i}" class="auto-grow-textarea" placeholder="Label / question text" rows="1" style="flex:1; min-width:220px; resize:vertical; padding:9px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(field.label)}</textarea>
         <button class="btn btn-ghost btn-sm" data-fb-up="${i}" ${i===0?'disabled':''} style="width:auto; padding:8px 12px;">↑</button>
         <button class="btn btn-ghost btn-sm" data-fb-down="${i}" ${i===draft.length-1?'disabled':''} style="width:auto; padding:8px 12px;">↓</button>
         <button class="btn btn-danger-outline btn-sm" data-fb-delete="${i}" style="width:auto; padding:8px 12px;">✕ Remove</button>
       </div>
       <div style="margin-top:8px; margin-left:36px;">
-        <textarea data-fb-desc="${i}" placeholder="Description (optional, shown smaller under the label)" rows="1" style="width:100%; resize:vertical; padding:7px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:12px; font-family:inherit; color:var(--slate-light);">${escapeHtml(field.description||'')}</textarea>
+        <textarea data-fb-desc="${i}" class="auto-grow-textarea" placeholder="Description (optional, shown smaller under the label)" rows="1" style="width:100%; resize:vertical; padding:7px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:12px; font-family:inherit; color:var(--slate-light); min-height:44px; height:44px; overflow:hidden;">${escapeHtml(field.description||'')}</textarea>
       </div>
       ${field.type==='select' ? `
       <div style="margin-top:8px; margin-left:36px;">
@@ -5218,18 +5218,22 @@ Langdy Team`;
         };
       });
       $$('[data-fb-label]').forEach(el=>{
+        autoGrowTextarea(el);
         el.oninput = () => {
           const i = Number(el.dataset.fbLabel);
           draft[i].label = el.value;
           formBuilderSavedFlash[formKey] = false;
+          autoGrowTextarea(el);
         };
         el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
       });
       $$('[data-fb-desc]').forEach(el=>{
+        autoGrowTextarea(el);
         el.oninput = () => {
           const i = Number(el.dataset.fbDesc);
           draft[i].description = el.value;
           formBuilderSavedFlash[formKey] = false;
+          autoGrowTextarea(el);
         };
         el.onblur = () => { if(formBuilderPreviewOpen[formKey]) render(); };
       });
