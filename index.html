@@ -2746,50 +2746,33 @@ function renderAdminDeviceSubmissions(){
 
 function renderDeviceSubmissionDetailModal(){
   const s = deviceSubmissions.find(x => x.id === deviceSubmissionDetailTarget) || {};
-  const row = (label, val) => `<div class="ticket-row"><span class="k">${label}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
-  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${label}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+  const schema = formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA;
+  const row = (label, val) => `<div class="ticket-row"><span class="k">${escapeHtml(label)}</span><span class="v" style="font-weight:600; font-family:inherit; text-align:right; max-width:60%;">${escapeHtml(val||'—')}</span></div>`;
+  const linkRow = (label, url) => `<div class="ticket-row"><span class="k">${escapeHtml(label)}</span><span class="v">${url?`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open ↗</a>`:'—'}</span></div>`;
+
+  // Driven by the CURRENT Device Form schema (not a fixed field list) — same
+  // reasoning as the Application detail view: a hardcoded field list quietly
+  // goes stale (or mismatches a field's actual data shape) the moment the
+  // form is customized, and errors out instead of just showing "—".
+  const fieldsHtml = schema
+    .filter(field => field.id !== 'tutorName')
+    .map(field => {
+      if(field.type === 'section'){
+        return `<div class="section-title" style="font-size:13.5px;">${escapeHtml(field.label)}</div>`;
+      }
+      const val = s[field.id];
+      if(field.type === 'file'){
+        return linkRow(field.label, s[field.id+'Url']);
+      }
+      const displayVal = Array.isArray(val) ? val.join(', ') : val;
+      return row(field.label, displayVal);
+    }).join('');
+
   return `
   <div class="modal-overlay" id="deviceDetailOverlay">
     <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
       <h3>${escapeHtml(s.tutorName)}</h3>
-      <div class="section-title" style="font-size:13.5px;">Computer</div>
-      ${row('Computer option', s.computerOption)}
-      ${row('Laptop duration (unplugged)', s.laptopDuration)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Backup Power Source</div>
-      ${row('Has power station?', s.hasPowerStation)}
-      ${row('Backup power sources', (s.backupPowerSources||[]).join(', '))}
-      ${row('Backup power duration', s.backupPowerDuration)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Power Station</div>
-      ${row('Spec (number / capacity)', s.powerStationSpec)}
-      ${row('Connection method', s.powerStationConnection)}
-      ${linkRow('Photo (laptop + power station)', s.powerStationPhotoUrl)}
-      ${row('Extra laptop duration w/ power station', s.laptopExtraDuration)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Power Outage</div>
-      ${row('Outage frequency (per 3 months)', s.outageFrequency)}
-      ${row('Last outage', s.lastOutageDate)}
-      ${row('Last outage duration', s.lastOutageDuration)}
-      ${row('Backup method during outage', s.outageBackupMethod)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Main Internet</div>
-      ${row('Type', s.mainInternetType)}
-      ${row('Provider', s.mainInternetProvider)}
-      ${linkRow('Speedtest screenshot', s.mainInternetSpeedtestUrl)}
-      ${row('Upload speed', s.mainInternetUpload)}
-      ${row('Download speed', s.mainInternetDownload)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Backup Internet</div>
-      ${row('Type', s.backupInternetType)}
-      ${row('Provider', s.backupInternetProvider)}
-      ${linkRow('Speedtest screenshot', s.backupInternetSpeedtestUrl)}
-      ${row('Upload speed', s.backupInternetUpload)}
-      ${row('Download speed', s.backupInternetDownload)}
-      <div class="divider"></div>
-      <div class="section-title" style="font-size:13.5px;">Noise-Canceling</div>
-      ${row('Headset model', s.headsetModel)}
-      ${row('Software', s.noiseCancelSoftware)}
+      ${fieldsHtml}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deviceDetailCloseBtn">Close</button>
         <button class="btn btn-primary" id="deviceMarkReviewedBtn">${s.reviewed?'Mark as New':'Mark as Reviewed'}</button>
