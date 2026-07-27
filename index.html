@@ -1300,7 +1300,7 @@ function startBookingsPolling(){
   if(bookingsPollTimer) return;
   bookingsPollTimer = setInterval(async () => {
     await loadBookings();
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !isFormControlFocused()){
       render();
     }
   }, 4000);
@@ -2064,6 +2064,7 @@ const TAB_GROUPS = [
   { label: 'Calendar', tab: 'calendar' },
   { label: 'Applications', tab: 'applications' },
   { label: 'Archive', children: [
+      ['archiveApplication','Application'],
       ['archive1stDemo','1st Demo'],
       ['archive2ndDemo','2nd Demo'],
       ['archiveResigned','Resigned'],
@@ -2149,6 +2150,7 @@ function renderAdmin(){
   else if(adminTab==='tutorChats') body = renderAdminTutorChats();
   else if(adminTab==='resignedTutors') body = renderAdminFormerTutors('resigned');
   else if(adminTab==='terminatedTutors') body = renderAdminFormerTutors('terminated');
+  else if(adminTab==='archiveApplication') body = renderAdminArchiveApplications();
   else if(adminTab==='archive1stDemo') body = renderAdminArchive('1stDemo');
   else if(adminTab==='archive2ndDemo') body = renderAdminArchive('2ndDemo');
   else if(adminTab==='archiveResigned') body = renderAdminArchive('resigned');
@@ -3024,6 +3026,13 @@ function isArchivedBooking(b){
   return b.demoResult === 'fail' || b.secondDemoResult === 'fail' || isFormerTutor(b);
 }
 
+// True for an application marked as failed at the application-review stage
+// itself (before ever booking a demo). Lets someone whose application didn't
+// go anywhere re-apply next cycle under the same email.
+function isArchivedApplication(a){
+  return a.result === 'fail';
+}
+
 function renderAdminTutorChats(){
   const tutors = bookings.filter(b => b.tutorAccountCreated === true && !isFormerTutor(b));
   const q = tutorChatsSearchQuery.trim().toLowerCase();
@@ -3147,7 +3156,47 @@ function renderAdminFormerTutors(status){
   </div>`;
 }
 
-let archiveSearchQuery = { '1stDemo': '', '2ndDemo': '', resigned: '', terminated: '' };
+let archiveSearchQuery = { application: '', '1stDemo': '', '2ndDemo': '', resigned: '', terminated: '' };
+
+function renderAdminArchiveApplications(){
+  const failed = applications.filter(isArchivedApplication);
+  const q = archiveSearchQuery.application.trim().toLowerCase();
+  const filtered = q
+    ? failed.filter(a => (a.fullName||'').toLowerCase().includes(q) || (a.email||'').toLowerCase().includes(q))
+    : failed;
+  const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
+
+  const emptyMessage = failed.length === 0 ? 'No failed applications on record.' : 'No one matches that search.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(a => {
+    const dateStr = a.submittedAt ? new Date(a.submittedAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    const matchingBooking = bookings.find(b => (b.email||'').trim().toLowerCase() === (a.email||'').trim().toLowerCase());
+    return `
+    <tr>
+      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(a.email)}</span></td>
+      <td class="tag">${dateStr}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-primary btn-sm" data-view-app="${a.id}">📄 View Application</button>
+          ${matchingBooking ? `<button class="btn btn-ghost btn-sm" data-chat-id="${matchingBooking.id}">💬 Open Chat</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-bottom:4px;">Application — Failed</div>
+    <div class="section-desc" style="margin-bottom:14px;">${failed.length} on record${q ? `, ${filtered.length} shown` : ''}</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="archiveAppSearchInput" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery.application)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    </div>
+    <table class="list-table">
+      <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
 
 // Archive: a record of people who are no longer active in the current
 // recruiting cycle — failed at either demo stage, or tutors who resigned or
@@ -3799,6 +3848,15 @@ function attachHandlers(){
       }
       state.busy = true; render();
       try{
+        await loadApplications();
+        const emailNorm = (state.answers[emailField.id]||'').trim().toLowerCase();
+        const dupEmail = applications.some(a => (a.email||'').trim().toLowerCase()===emailNorm && !isArchivedApplication(a));
+        if(dupEmail){
+          state.busy = false;
+          state.error = 'This email address has already been used to submit an application.';
+          render();
+          return;
+        }
         const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
         const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false };
         for(const field of schema){
@@ -5271,6 +5329,28 @@ Langdy Team`;
         const a = applications.find(x=>x.id===applicationDetailTarget);
         saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
       };
+    }
+
+    if(adminTab==='archiveApplication'){
+      const searchInput = $('#archiveAppSearchInput');
+      if(searchInput){
+        searchInput.oninput = e => { archiveSearchQuery.application = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
+      $$('[data-view-app]').forEach(el=>{
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+      });
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          chatDraftText = '';
+          render();
+          await markChatReadByAdmin(id);
+          render();
+        };
+      });
     }
 
     if(adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
