@@ -841,6 +841,15 @@ const db = firebase.firestore();
 const fbStorage = firebase.storage();
 const KV_COLLECTION = 'kv';
 
+// Admin gets its OWN persistent Firebase app/auth instance, completely
+// separate from the default one (which tutors sign into). Firebase Auth's
+// default persistence is shared across every tab of the same browser, so
+// without this, an admin tab open in the background would "see" a tutor
+// signing in elsewhere as an unrecognized/unauthorized account and sign it
+// back out — the two need to be fully isolated, not just logically gated.
+const adminApp = firebase.initializeApp(firebaseConfig, 'admin-app');
+const adminAuth = adminApp.auth();
+
 // Firebase Auth has no built-in "roles" without a backend (Admin SDK/custom
 // claims), so anyone who can successfully sign in — including an invited
 // tutor — could otherwise pass the ?admin login check too. This allowlist is
@@ -2906,7 +2915,7 @@ function renderAdminChats(){
   let filtered = chatsFilterUnreadOnly ? withMsgs.filter(b => unreadCountForAdmin(b) > 0) : withMsgs;
   if(chatsFilterStage !== 'all') filtered = filtered.filter(b => chatStageOf(b) === chatsFilterStage);
   const q = chatsSearchQuery.trim().toLowerCase();
-  if(q) filtered = filtered.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q));
+  if(q) filtered = filtered.filter(b => (b.fullName||'').toLowerCase().includes(q));
 
   const sorted = [...filtered].sort((a,b) => {
     const ta = new Date(lastMessageInfo(a).at).getTime();
@@ -2939,7 +2948,7 @@ function renderAdminChats(){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <input type="text" id="chatsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(chatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <input type="text" id="chatsSearchInput" placeholder="Search by name…" value="${escapeHtml(chatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
       <select id="chatsStageFilterSelect" style="padding:10px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         <option value="all" ${chatsFilterStage==='all'?'selected':''}>All stages</option>
         <option value="1st" ${chatsFilterStage==='1st'?'selected':''}>1st Demo</option>
@@ -2966,7 +2975,7 @@ function renderAdminTutorChats(){
   const tutors = bookings.filter(b => b.tutorAccountCreated === true);
   const q = tutorChatsSearchQuery.trim().toLowerCase();
   let filtered = q
-    ? tutors.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q))
+    ? tutors.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.adminChatLabel||'').toLowerCase().includes(q))
     : tutors;
   if(tutorChatsFilterUnreadOnly) filtered = filtered.filter(b => unreadCountForAdmin(b) > 0);
 
@@ -3015,7 +3024,7 @@ function renderAdminTutorChats(){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <input type="text" id="tutorChatsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(tutorChatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <input type="text" id="tutorChatsSearchInput" placeholder="Search by name…" value="${escapeHtml(tutorChatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
       <label class="checkbox-item" style="cursor:pointer; white-space:nowrap;">
         <input type="checkbox" id="tutorChatsUnreadOnlyToggle" ${tutorChatsFilterUnreadOnly?'checked':''}>
         Unread only (${totalUnreadThreads})
@@ -3574,7 +3583,12 @@ function attachHandlers(){
       // Real admin or tutor session — actually sign out of Firebase, not
       // just reset the view. onAuthStateChanged (set up in init) picks up
       // the sign-out and handles switching back to the right gate screen.
-      try{ await firebase.auth().signOut(); }catch(e){ console.error('Sign out failed:', e); }
+      // Admin and tutor now live on separate Firebase Auth instances, so
+      // sign out of whichever one is actually active here.
+      try{
+        if(currentAdminUser) await adminAuth.signOut();
+        else await firebase.auth().signOut();
+      }catch(e){ console.error('Sign out failed:', e); }
       return;
     }
     view='gate'; gateError=''; gateMode='code'; findEmail=''; findError='';
@@ -3787,7 +3801,7 @@ function attachHandlers(){
           render();
         }, 15000);
         try{
-          await firebase.auth().signInWithEmailAndPassword(email, password);
+          await adminAuth.signInWithEmailAndPassword(email, password);
           clearTimeout(signInTimeoutId);
           if(timedOut) return;
           // onAuthStateChanged (set up in init) picks up the signed-in user,
@@ -5127,58 +5141,29 @@ Langdy Team`;
   else if(params.has('tutor')){ gateMode = 'tutorLogin'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
-  // Firebase persists the signed-in admin across reloads by default, so this
-  // fires immediately on page load if they're already signed in from before,
-  // and again any time they sign in or out. Wrapped in try/catch so that if
-  // Auth ever fails to initialize, the rest of the app still renders instead
-  // of the page going blank.
+  // Admin and tutor now each get their own Firebase Auth instance (see
+  // adminAuth above), so their sign-in states can't interfere with each
+  // other — signing into one no longer bounces the other back to its login
+  // screen. Each listener persists across reloads independently and is
+  // wrapped in try/catch so a failure in one doesn't blank the whole page.
   try{
-    let authInitialCheckDone = false;
-    firebase.auth().onAuthStateChanged(async (user) => {
-      const isInitialCheck = !authInitialCheckDone;
-      authInitialCheckDone = true;
-
-      if(cameFromTutorLink){
-        currentTutorUser = user;
-        if(user){
-          tutorLoginBusy = false;
-          if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
-            await loadBookings();
-            const match = bookings.find(b => (b.email||'').trim().toLowerCase() === (user.email||'').trim().toLowerCase());
-            if(match){
-              tutorLoginError = '';
-              bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
-                     agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
-              view = 'book';
-            } else {
-              tutorLoginError = "Signed in, but couldn't find a booking under this email. Please contact the admin.";
-              gateMode = 'tutorLogin';
-              view = 'gate';
-              firebase.auth().signOut(); // no matching booking — don't stay signed in with nowhere to go
-            }
-          }
-        } else {
-          tutorLoginBusy = false;
-          if(!isInitialCheck && !tutorLoginError) gateMode = 'tutorLogin';
-          if(view === 'book') view = 'gate';
-        }
-        render();
-        return;
-      }
+    let adminAuthInitialCheckDone = false;
+    adminAuth.onAuthStateChanged(async (user) => {
+      const isInitialCheck = !adminAuthInitialCheckDone;
+      adminAuthInitialCheckDone = true;
 
       const isRealAdmin = !!user && isAllowedAdminEmail(user.email);
       currentAdminUser = isRealAdmin ? user : null;
 
       if(user && !isRealAdmin && cameFromAdminLink){
         // They successfully authenticated with Firebase, but this email
-        // isn't on the admin allowlist — e.g. an invited tutor tried their
-        // own credentials on the ?admin link. Authentication succeeding is
-        // NOT the same as being authorized, so never grant admin access
-        // here; sign them back out immediately.
+        // isn't on the admin allowlist. Authentication succeeding is NOT
+        // the same as being authorized, so never grant admin access here;
+        // sign them back out immediately.
         adminLoginBusy = false;
         adminLoginError = "This account doesn't have admin access.";
         gateMode = 'adminLogin';
-        firebase.auth().signOut();
+        adminAuth.signOut();
         render();
         return;
       }
@@ -5214,7 +5199,51 @@ Langdy Team`;
       render();
     });
   }catch(e){
-    console.error('Firebase Auth failed to initialize:', e);
+    console.error('Admin Auth failed to initialize:', e);
+  }
+
+  try{
+    let tutorAuthInitialCheckDone = false;
+    firebase.auth().onAuthStateChanged(async (user) => {
+      const isInitialCheck = !tutorAuthInitialCheckDone;
+      tutorAuthInitialCheckDone = true;
+      currentTutorUser = user;
+
+      if(!cameFromTutorLink){
+        // Don't auto-route based on a persisted tutor session unless this
+        // pageview is specifically the tutor link — same principle as the
+        // admin side: a background/persisted session shouldn't leak into
+        // an unrelated page.
+        render();
+        return;
+      }
+
+      if(user){
+        tutorLoginBusy = false;
+        if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
+          await loadBookings();
+          const match = bookings.find(b => (b.email||'').trim().toLowerCase() === (user.email||'').trim().toLowerCase());
+          if(match){
+            tutorLoginError = '';
+            bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
+                   agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
+            view = 'book';
+          } else {
+            tutorLoginError = "Signed in, but couldn't find a booking under this email. Please contact the admin.";
+            gateMode = 'tutorLogin';
+            view = 'gate';
+            firebase.auth().signOut(); // no matching booking — don't stay signed in with nowhere to go
+          }
+        }
+      } else {
+        tutorLoginBusy = false;
+        if(!isInitialCheck && !tutorLoginError) gateMode = 'tutorLogin';
+        if(view === 'book') view = 'gate';
+      }
+      render();
+    });
+  }catch(e){
+    console.error('Tutor Auth failed to initialize:', e);
   }
 
   render();
