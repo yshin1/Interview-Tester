@@ -627,7 +627,7 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'kakaoIdImage', type:'image', imageKey:'kakaoId', label:'How to check your KakaoTalk ID', description:'Not sure what your KakaoTalk ID is? Follow the steps in the image below.'},
   {id:'kakaoId', type:'text', label:'KakaoTalk ID'},
   {id:'teachingExperience', type:'text', label:'Describe your teaching experience'},
-  {id:'recording', type:'file', label:'Voice Recording — read the provided paragraph aloud and upload as an MP3'},
+  {id:'recording', type:'audio', label:'Voice Recording — read the provided paragraph aloud and upload as an MP3'},
   {id:'section_equipment', type:'section', label:'Equipment & Connectivity'},
   {id:'internetType', type:'select', label:'Main internet type', options:['LAN','Fiber']},
   {id:'backupInternetImage', type:'image', imageKey:'backupInternet', label:"Take a look at the image below and give your answer on whether or not you're equipped with this option."},
@@ -1103,10 +1103,11 @@ async function deleteOneDeviceSubmission(id){
 /* ============================================================
    Chat helpers (per-booking message thread)
    ============================================================ */
-async function sendChatMessage(bookingId, from, text){
+async function sendChatMessage(bookingId, from, text, fileInfo){
   const trimmed = (text||'').trim();
-  if(!trimmed) return null;
+  if(!trimmed && !fileInfo) return null;
   const msg = { from, text: trimmed, at: new Date().toISOString() };
+  if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
   // Atomic single-document update — no need to read the whole collection
   // first just to append one message. arrayUnion is safe under concurrent
   // writes from both sides of the chat at once.
@@ -1126,6 +1127,18 @@ function linkify(escapedText){
     `<a href="${url}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline;">${url}</a>`
   );
 }
+function renderChatFileAttachment(m){
+  if(!m.fileUrl) return '';
+  const type = m.fileType || '';
+  const name = m.fileName || 'file';
+  if(type.startsWith('image/')){
+    return `<a href="${escapeHtml(m.fileUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(m.fileUrl)}" alt="${escapeHtml(name)}" style="max-width:100%; max-height:220px; border-radius:8px; margin-top:6px; display:block;"></a>`;
+  }
+  if(type.startsWith('audio/')){
+    return `<audio controls src="${escapeHtml(m.fileUrl)}" style="width:100%; margin-top:6px;"></audio>`;
+  }
+  return `<a href="${escapeHtml(m.fileUrl)}" target="_blank" rel="noopener" class="chat-file-link" style="display:flex; align-items:center; gap:6px; margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.06); text-decoration:none; color:inherit; font-size:12.5px;">📎 ${escapeHtml(name)}</a>`;
+}
 function renderChatThread(messages, viewerRole, bookingId){
   const msgs = messages || [];
   if(msgs.length === 0){
@@ -1141,7 +1154,8 @@ function renderChatThread(messages, viewerRole, bookingId){
     const time = new Date(m.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
     return `<div class="chat-bubble ${mine?'mine':'theirs'}">
       <div class="who">${mine ? 'You' : who}${canDelete ? ` <button class="link-btn" data-delete-msg="${escapeHtml(bookingId)}" data-msg-index="${i}" style="font-size:10.5px; padding:0; margin-left:6px; color:var(--danger);" title="Delete message">🗑</button>` : ''}</div>
-      ${linkify(escapeHtml(m.text).replace(/\n/g,'<br>'))}
+      ${m.text ? linkify(escapeHtml(m.text).replace(/\n/g,'<br>')) : ''}
+      ${renderChatFileAttachment(m)}
       <div class="t">${time}</div>
     </div>`;
   }).join('');
@@ -1185,27 +1199,29 @@ Your 1st demo schedule: {TIME} PHT on {DATE}
 // Combines "send the applicant's message" + "maybe auto-send the guideline"
 // into a SINGLE load + SINGLE save, instead of two separate load/save pairs.
 // That was doubling the number of slow Apps Script round trips per message.
-async function sendApplicantMessage(bookingId, text){
+async function sendApplicantMessage(bookingId, text, fileInfo){
   const trimmed = (text||'').trim();
-  if(!trimmed) return null;
-  await loadBookings();
+  if(!trimmed && !fileInfo) return null;
   const idx = bookings.findIndex(b => b.id === bookingId);
   if(idx === -1) return null;
   const b = bookings[idx];
   const msg = { from:'applicant', text: trimmed, at: new Date().toISOString() };
-  let messages = [...(b.messages||[]), msg];
-  let guidelineSent = b.guidelineSent;
-  let shouldSendGuideline = false;
+  if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
 
+  let shouldSendGuideline = false;
+  const patch = { messages: firebase.firestore.FieldValue.arrayUnion(msg) };
   const name = (b.fullName||'').trim().toLowerCase();
-  if(!guidelineSent && name && trimmed.toLowerCase().includes(name)){
-    guidelineSent = true; // mark immediately so it can never double-trigger, even mid-sequence
+  if(!b.guidelineSent && name && trimmed.toLowerCase().includes(name)){
+    patch.guidelineSent = true; // mark immediately so it can never double-trigger, even mid-sequence
     shouldSendGuideline = true;
   }
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update(patch);
 
-  const updated = Object.assign({}, b, { messages, guidelineSent });
-  const next = [...bookings]; next[idx] = updated;
-  await saveBookings(next);
+  const updated = Object.assign({}, b, {
+    messages: [...(b.messages||[]), msg],
+    guidelineSent: patch.guidelineSent !== undefined ? patch.guidelineSent : b.guidelineSent
+  });
+  bookings[idx] = updated;
 
   if(shouldSendGuideline){
     // Fire-and-forget: send the 5 guideline messages one at a time, 5 seconds
@@ -1461,6 +1477,83 @@ function autoGrowTextarea(el){
 }
 function isValidFullName(v){ return v.trim().length>=2; }
 
+// In-browser voice recording for 'audio' type fields, using MediaRecorder.
+// Keyed by formKey+fieldId so multiple recorder widgets on the same page
+// (e.g. across forms) never interfere with each other.
+const audioRecorderState = {};
+async function startAudioRecording(formKey, fieldId, onDone){
+  const key = `${formKey}_${fieldId}`;
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    const preferredType = 'audio/webm';
+    const mimeType = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(preferredType)) ? preferredType : '';
+    const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => { if(e.data && e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      stream.getTracks().forEach(t => t.stop());
+      delete audioRecorderState[key];
+      onDone(blob);
+    };
+    audioRecorderState[key] = { mediaRecorder, stream };
+    mediaRecorder.start();
+    return true;
+  }catch(e){
+    console.error('Microphone access error:', e);
+    return false;
+  }
+}
+function stopAudioRecording(formKey, fieldId){
+  const key = `${formKey}_${fieldId}`;
+  const rec = audioRecorderState[key];
+  if(rec && rec.mediaRecorder.state !== 'inactive') rec.mediaRecorder.stop();
+}
+// Wires up the record/stop/upload/re-record controls for one 'audio' field.
+// Shared across the Apply/Signup/Device forms so the MediaRecorder logic
+// only needs to live in one place.
+function wireAudioField(formKey, field, state, render){
+  const startBtn = document.querySelector(`[data-audio-start="${field.id}"]`);
+  const stopBtn = document.querySelector(`[data-audio-stop="${field.id}"]`);
+  const statusEl = document.querySelector(`[data-audio-status="${field.id}"]`);
+  const uploadInput = document.querySelector(`[data-audio-upload="${field.id}"]`);
+  const rerecordBtn = document.querySelector(`[data-audio-rerecord="${field.id}"]`);
+  const clearBtn = document.querySelector(`[data-audio-clear="${field.id}"]`);
+
+  const setFile = (file) => {
+    state.files[field.id] = file;
+    state.files[field.id+'Name'] = file ? file.name : '';
+    if(!state.filePreviews) state.filePreviews = {};
+    if(state.filePreviews[field.id]) URL.revokeObjectURL(state.filePreviews[field.id]);
+    state.filePreviews[field.id] = file ? URL.createObjectURL(file) : null;
+    render();
+  };
+
+  if(startBtn) startBtn.onclick = async () => {
+    if(statusEl) statusEl.textContent = 'Requesting microphone access…';
+    const ok = await startAudioRecording(formKey, field.id, (blob) => {
+      const file = new File([blob], `recording_${Date.now()}.webm`, { type: blob.type || 'audio/webm' });
+      setFile(file);
+    });
+    if(ok){
+      startBtn.style.display = 'none';
+      if(stopBtn) stopBtn.style.display = '';
+      if(statusEl) statusEl.textContent = '🔴 Recording…';
+    } else if(statusEl){
+      statusEl.textContent = "Couldn't access the microphone — please allow access, or upload a file instead.";
+    }
+  };
+  if(stopBtn) stopBtn.onclick = () => {
+    stopAudioRecording(formKey, field.id);
+    stopBtn.style.display = 'none';
+    if(startBtn) startBtn.style.display = '';
+    if(statusEl) statusEl.textContent = '';
+  };
+  if(uploadInput) uploadInput.onchange = e => { setFile(e.target.files[0] || null); };
+  if(rerecordBtn) rerecordBtn.onclick = () => { setFile(null); };
+  if(clearBtn) clearBtn.onclick = () => { setFile(null); };
+}
+
 // Small banner shown at the top of Applications / Account Signups tabs with
 // the actual shareable link (?apply or ?signup) and a one-click copy button.
 function renderShareLinkBox(paramName, label){
@@ -1496,7 +1589,7 @@ function exportSubmissionsToExcel(records, schema, filenamePrefix){
     const row = {};
     fieldHeaders.forEach(({field, header}) => {
       let val;
-      if(field.type === 'file'){
+      if(field.type === 'file' || field.type === 'audio'){
         val = r[field.id+'Url'] || '';
       } else if(field.type === 'checkbox'){
         val = r[field.id] ? 'Yes' : 'No';
@@ -1766,7 +1859,7 @@ function resolveFieldImageSrc(imageKey){
   const key = FORM_REFERENCE_IMAGES[imageKey] ? imageKey : 'backupInternet';
   return `data:image/jpeg;base64,${FORM_REFERENCE_IMAGES[key]}`;
 }
-function renderDynamicField(formKey, field, value, fileName){
+function renderDynamicField(formKey, field, value, fileName, previewUrl){
   const idAttr = `df_${formKey}_${field.id}`;
   const labelBlock = renderFieldLabelBlock(field);
   switch(field.type){
@@ -1783,6 +1876,29 @@ function renderDynamicField(formKey, field, value, fileName){
       return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option><option value="Yes" ${value==='Yes'?'selected':''}>Yes</option><option value="No" ${value==='No'?'selected':''}>No</option></select></div>`;
     case 'file':
       return `<div class="field">${labelBlock}<div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
+    case 'audio': {
+      const hasRecording = !!previewUrl;
+      return `<div class="field">${labelBlock}
+        <div data-audio-widget="${field.id}">
+          ${hasRecording ? `
+            <audio controls src="${escapeHtml(previewUrl)}" style="width:100%; margin-bottom:8px;"></audio>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-ghost btn-sm" style="width:auto;" data-audio-rerecord="${field.id}">🔁 Record Again</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="width:auto;" data-audio-clear="${field.id}">🗑 Remove</button>
+            </div>
+          ` : `
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-gold btn-sm" style="width:auto;" data-audio-start="${field.id}">🎙️ Start Recording</button>
+              <button type="button" class="btn btn-danger-outline btn-sm" style="width:auto; display:none;" data-audio-stop="${field.id}">⏹ Stop Recording</button>
+              <span data-audio-status="${field.id}" style="font-size:12.5px; color:var(--slate-light);"></span>
+            </div>
+            <div style="margin:10px 0 6px; font-size:12px; color:var(--slate-light);">— or upload a file instead —</div>
+            <input type="file" accept="audio/*" data-audio-upload="${field.id}">
+            ${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}
+          `}
+        </div>
+      </div>`;
+    }
     case 'image':
       return `<div class="field">${labelBlock}<img src="${resolveFieldImageSrc(field.imageKey)}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
     case 'checkbox':
@@ -1794,13 +1910,13 @@ function renderDynamicField(formKey, field, value, fileName){
   }
 }
 function renderDynamicForm(formKey, schema, state){
-  return schema.map(field => renderDynamicField(formKey, field, state.answers[field.id], state.files[field.id+'Name'])).join('');
+  return schema.map(field => renderDynamicField(formKey, field, state.answers[field.id], state.files[field.id+'Name'], state.filePreviews && state.filePreviews[field.id])).join('');
 }
 
 let dynamicFormState = {
-  apply: { answers:{}, files:{}, error:'', busy:false, done:false },
-  device: { answers:{}, files:{}, error:'', busy:false, done:false },
-  signup: { answers:{}, files:{}, error:'', busy:false, done:false }
+  apply: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false },
+  device: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false },
+  signup: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false }
 };
 
 function findNameForDone(schema, answers){
@@ -2105,7 +2221,10 @@ function renderChatPanel(bookingId, viewerRole){
   return `
   <div class="chat-panel">
     <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId)}</div>
+    <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
     <div class="chat-input-row">
+      <button class="btn btn-ghost btn-sm" id="chatAttachBtn" type="button" style="width:auto; padding:10px 12px;" title="Attach a file">📎</button>
+      <input type="file" id="chatFileInput" style="display:none;">
       <input type="text" id="chatInput" placeholder="Type a message…" autocomplete="off" value="${escapeHtml(chatDraftText)}">
       <button class="btn btn-gold" id="chatSendBtn">Send</button>
     </div>
@@ -2487,9 +2606,9 @@ function renderApplicationDetailModal(){
     .filter(field => field.type !== 'section' && field.type !== 'image' && field.id !== 'fullName' && field.id !== 'email')
     .map(field => {
       const val = a[field.id];
-      if(field.type === 'file'){
+      if(field.type === 'file' || field.type === 'audio'){
         const url = a[field.id+'Url'];
-        if(field.id === 'recording'){
+        if(field.type === 'audio' || field.id === 'recording'){
           return url ? `
           <div class="field">
             <label>${escapeHtml(field.label)}</label>
@@ -2798,6 +2917,14 @@ function renderDeviceSubmissionDetailModal(){
         return `<div class="section-title" style="font-size:13.5px;">${escapeHtml(field.label)}</div>`;
       }
       const val = s[field.id];
+      if(field.type === 'audio'){
+        const url = s[field.id+'Url'];
+        return url ? `
+        <div class="field">
+          <label>${escapeHtml(field.label)}</label>
+          <audio controls src="${escapeHtml(url)}" style="width:100%;"></audio>
+        </div>` : `<div class="ticket-row"><span class="k">${escapeHtml(field.label)}</span><span class="v">—</span></div>`;
+      }
       if(field.type === 'file'){
         return linkRow(field.label, s[field.id+'Url']);
       }
@@ -3697,6 +3824,7 @@ const FIELD_TYPE_LABELS = {
   select: 'Dropdown',
   yesno: 'Yes / No',
   file: 'File upload',
+  audio: 'Audio recording',
   image: 'Reference image',
   checkbox: 'Checkbox',
   notice: 'Notice box'
@@ -3766,6 +3894,7 @@ function renderFormBuilder(formKey){
         <option value="select">Dropdown</option>
         <option value="yesno">Yes / No</option>
         <option value="file">File upload</option>
+        <option value="audio">Audio recording</option>
         <option value="section">Section header</option>
         <option value="checkbox">Checkbox</option>
         <option value="notice">Notice box</option>
@@ -3954,6 +4083,7 @@ function attachHandlers(){
     const schema = formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA;
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image') return;
+      if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
       const el = $(`#df_${formKey}_${field.id}`);
       if(!el) return;
       if(field.type === 'file'){
@@ -4002,7 +4132,7 @@ function attachHandlers(){
         const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false };
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image') continue;
-          if(field.type === 'file'){
+          if(field.type === 'file' || field.type === 'audio'){
             const file = state.files[field.id];
             record[field.id+'Url'] = file ? await uploadApplicationFile(file, applicationId, field.id) : '';
           } else {
@@ -4026,6 +4156,7 @@ function attachHandlers(){
     const schema = formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA;
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image' || field.type === 'notice') return;
+      if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
       const el = $(`#df_${formKey}_${field.id}`);
       if(!el) return;
       if(field.type === 'file'){
@@ -4072,7 +4203,7 @@ function attachHandlers(){
         const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false };
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image' || field.type === 'notice') continue;
-          if(field.type === 'file'){
+          if(field.type === 'file' || field.type === 'audio'){
             const file = state.files[field.id];
             record[field.id+'Url'] = file ? await uploadEntityFile(file, 'accountSignups', signupId, field.id) : '';
           } else if(field.type === 'checkbox'){
@@ -4098,6 +4229,7 @@ function attachHandlers(){
     const schema = formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA;
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image') return;
+      if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
       const el = $(`#df_${formKey}_${field.id}`);
       if(!el) return;
       if(field.type === 'file'){
@@ -4130,7 +4262,7 @@ function attachHandlers(){
         const record = { id: deviceId, submittedAt: new Date().toISOString(), reviewed: false };
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image') continue;
-          if(field.type === 'file'){
+          if(field.type === 'file' || field.type === 'audio'){
             const file = state.files[field.id];
             record[field.id+'Url'] = file ? await uploadEntityFile(file, 'deviceSubmissions', deviceId, field.id) : '';
           } else {
@@ -4410,6 +4542,28 @@ function attachHandlers(){
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
     }
+    const chatAttachBtn = $('#chatAttachBtn');
+    const chatFileInput = $('#chatFileInput');
+    const chatAttachStatus = $('#chatAttachStatus');
+    if(chatAttachBtn && chatFileInput) chatAttachBtn.onclick = () => chatFileInput.click();
+    if(chatFileInput) chatFileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
+      if(chatAttachBtn) chatAttachBtn.disabled = true;
+      try{
+        const url = await uploadEntityFile(file, 'bookings', bk.id, 'chat_'+Date.now());
+        await sendApplicantMessage(bk.id, '', { url, name: file.name, type: file.type });
+        render();
+        const thread = document.getElementById('chatThread');
+        if(thread) thread.scrollTop = thread.scrollHeight;
+      }catch(err){
+        console.error('Chat file upload error:', err);
+        if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
+      }
+      chatFileInput.value = '';
+      if(chatAttachBtn) chatAttachBtn.disabled = false;
+    };
     if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) renderPreservingChatScroll(); });
     const doneClose = $('#doneClose');
     if(doneClose) doneClose.onclick = () => {
@@ -5616,6 +5770,29 @@ Langdy Team`;
       }
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
+      const chatAttachBtn = $('#chatAttachBtn');
+      const chatFileInput = $('#chatFileInput');
+      const chatAttachStatus = $('#chatAttachStatus');
+      if(chatAttachBtn && chatFileInput) chatAttachBtn.onclick = () => chatFileInput.click();
+      if(chatFileInput) chatFileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
+        if(chatAttachBtn) chatAttachBtn.disabled = true;
+        try{
+          const url = await uploadEntityFile(file, 'bookings', chatTarget.id, 'chat_'+Date.now());
+          const updated = await sendChatMessage(chatTarget.id, 'admin', '', { url, name: file.name, type: file.type });
+          if(updated) chatTarget = updated;
+          render();
+          const freshThread = document.getElementById('chatThread');
+          if(freshThread) freshThread.scrollTop = freshThread.scrollHeight;
+        }catch(err){
+          console.error('Chat file upload error:', err);
+          if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
+        }
+        chatFileInput.value = '';
+        if(chatAttachBtn) chatAttachBtn.disabled = false;
+      };
       $$('[data-delete-msg]').forEach(el=>{
         el.onclick = async () => {
           const bookingId = el.dataset.deleteMsg;
