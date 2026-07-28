@@ -11,6 +11,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
 <style>
   :root{
     --navy:#16233F;
@@ -907,6 +908,27 @@ async function uploadEntityFile(file, folder, entityId, fieldName){
   return await ref.getDownloadURL();
 }
 
+// Deletes the actual Storage file behind a download URL — used whenever a
+// record or message with an attachment gets deleted, so the file doesn't
+// sit around in Storage forever with nothing left pointing to it.
+async function deleteStorageFileByUrl(url){
+  if(!url) return;
+  try{
+    await fbStorage.refFromURL(url).delete();
+  }catch(e){
+    // Not fatal — the record deletion should still proceed even if the
+    // underlying file was already gone or briefly unreachable.
+    console.error('Failed to delete storage file:', url, e);
+  }
+}
+// Finds every "...Url" field on a record (verificationImageUrl, recordingUrl,
+// etc.) and deletes each corresponding Storage file in parallel.
+async function deleteAttachedFiles(record){
+  if(!record) return;
+  const urlKeys = Object.keys(record).filter(k => k.endsWith('Url') && record[k]);
+  await Promise.all(urlKeys.map(k => deleteStorageFileByUrl(record[k])));
+}
+
 const storage = {
   async get(key){
     const snap = await db.collection(KV_COLLECTION).doc(key).get();
@@ -1052,6 +1074,8 @@ async function saveOneApplication(app){
   if(idx === -1) applications.push(app); else applications[idx] = app;
 }
 async function deleteOneApplication(id){
+  const record = applications.find(x => x.id === id);
+  await deleteAttachedFiles(record);
   await adminDb.collection(APPLICATIONS_COLLECTION).doc(id).delete();
   applications = applications.filter(x => x.id !== id);
 }
@@ -1074,6 +1098,8 @@ async function saveOneAccountSignup(rec){
   if(idx === -1) accountSignups.push(rec); else accountSignups[idx] = rec;
 }
 async function deleteOneAccountSignup(id){
+  const record = accountSignups.find(x => x.id === id);
+  await deleteAttachedFiles(record);
   await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
   accountSignups = accountSignups.filter(x => x.id !== id);
 }
@@ -1096,6 +1122,8 @@ async function saveOneDeviceSubmission(rec){
   if(idx === -1) deviceSubmissions.push(rec); else deviceSubmissions[idx] = rec;
 }
 async function deleteOneDeviceSubmission(id){
+  const record = deviceSubmissions.find(x => x.id === id);
+  await deleteAttachedFiles(record);
   await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
   deviceSubmissions = deviceSubmissions.filter(x => x.id !== id);
 }
@@ -1105,7 +1133,7 @@ async function deleteOneDeviceSubmission(id){
    ============================================================ */
 async function sendChatMessage(bookingId, from, text, fileInfo){
   const trimmed = (text||'').trim();
-  if(!trimmed && !fileInfo) return null;
+  if(!trimmed && !fileInfo) return false;
   const msg = { from, text: trimmed, at: new Date().toISOString() };
   if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
   // Atomic single-document update — no need to read the whole collection
@@ -1114,11 +1142,14 @@ async function sendChatMessage(bookingId, from, text, fileInfo){
   await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({
     messages: firebase.firestore.FieldValue.arrayUnion(msg)
   });
-  const idx = bookings.findIndex(b => b.id === bookingId);
-  if(idx === -1) return null;
-  const updated = Object.assign({}, bookings[idx], { messages: [...(bookings[idx].messages||[]), msg] });
-  bookings[idx] = updated;
-  return updated;
+  // Deliberately NOT also pushing this message into the local `bookings`
+  // array here — the real-time listener already watching this booking (via
+  // startChatPolling) reflects Firestore's own local-write cache the moment
+  // this update lands, often before this line would even run. Doing both
+  // was adding the same message twice to the in-memory array — the message
+  // showing up doubled in the thread until the next send silently "fixed"
+  // it by re-deriving state fresh from the next snapshot.
+  return true;
 }
 // Turns any http(s) URL inside an already-escaped message into a clickable
 // link, so recipients can just tap it instead of having to copy-paste.
@@ -1197,13 +1228,12 @@ Your 1st demo schedule: {TIME} PHT on {DATE}
 ];
 
 // Combines "send the applicant's message" + "maybe auto-send the guideline"
-// into a SINGLE load + SINGLE save, instead of two separate load/save pairs.
-// That was doubling the number of slow Apps Script round trips per message.
+// into a single Firestore update.
 async function sendApplicantMessage(bookingId, text, fileInfo){
   const trimmed = (text||'').trim();
-  if(!trimmed && !fileInfo) return null;
+  if(!trimmed && !fileInfo) return false;
   const idx = bookings.findIndex(b => b.id === bookingId);
-  if(idx === -1) return null;
+  if(idx === -1) return false;
   const b = bookings[idx];
   const msg = { from:'applicant', text: trimmed, at: new Date().toISOString() };
   if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
@@ -1216,12 +1246,9 @@ async function sendApplicantMessage(bookingId, text, fileInfo){
     shouldSendGuideline = true;
   }
   await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update(patch);
-
-  const updated = Object.assign({}, b, {
-    messages: [...(b.messages||[]), msg],
-    guidelineSent: patch.guidelineSent !== undefined ? patch.guidelineSent : b.guidelineSent
-  });
-  bookings[idx] = updated;
+  // No manual local `bookings` update here — see the matching note in
+  // sendChatMessage(). The real-time listener already reflects this the
+  // moment the write lands, and doing both was doubling the message.
 
   if(shouldSendGuideline){
     // Fire-and-forget: send the 5 guideline messages one at a time, 5 seconds
@@ -1229,7 +1256,7 @@ async function sendApplicantMessage(bookingId, text, fileInfo){
     // applicant's own message send doesn't hang waiting ~20 seconds for this.
     sendGuidelineMessagesWithDelay(bookingId, fmtDateLabel(b.date), b.time);
   }
-  return updated;
+  return true;
 }
 
 const GUIDELINE_MESSAGE_DELAY_MS = 5000;
@@ -1481,6 +1508,54 @@ function isValidFullName(v){ return v.trim().length>=2; }
 // Keyed by formKey+fieldId so multiple recorder widgets on the same page
 // (e.g. across forms) never interfere with each other.
 const audioRecorderState = {};
+
+// Converts whatever MediaRecorder actually captured (webm/opus in Chrome,
+// mp4/aac in Safari, etc.) into a genuine MP3 file using lamejs. Browsers
+// don't support recording directly to MP3, and the recorded container
+// formats are sometimes inconsistent about playback/seek support outside
+// the browser that made them — decoding to raw audio and re-encoding to MP3
+// sidesteps both problems and gives a real, universally-playable .mp3.
+async function convertBlobToMp3(blob){
+  const arrayBuffer = await blob.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioCtx();
+  let audioBuffer;
+  try{
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  }finally{
+    audioCtx.close();
+  }
+  const channels = Math.min(audioBuffer.numberOfChannels, 2);
+  const sampleRate = audioBuffer.sampleRate;
+  const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
+
+  const floatTo16BitPCM = (input) => {
+    const output = new Int16Array(input.length);
+    for(let i = 0; i < input.length; i++){
+      const s = Math.max(-1, Math.min(1, input[i]));
+      output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return output;
+  };
+
+  const left = floatTo16BitPCM(audioBuffer.getChannelData(0));
+  const right = channels === 2 ? floatTo16BitPCM(audioBuffer.getChannelData(1)) : null;
+
+  const sampleBlockSize = 1152; // multiple of 576, as lamejs expects
+  const mp3Chunks = [];
+  for(let i = 0; i < left.length; i += sampleBlockSize){
+    const leftChunk = left.subarray(i, i + sampleBlockSize);
+    const mp3buf = right
+      ? mp3Encoder.encodeBuffer(leftChunk, right.subarray(i, i + sampleBlockSize))
+      : mp3Encoder.encodeBuffer(leftChunk);
+    if(mp3buf.length > 0) mp3Chunks.push(mp3buf);
+  }
+  const finalChunk = mp3Encoder.flush();
+  if(finalChunk.length > 0) mp3Chunks.push(finalChunk);
+
+  return new Blob(mp3Chunks, { type: 'audio/mpeg' });
+}
+
 async function startAudioRecording(formKey, fieldId, onDone){
   const key = `${formKey}_${fieldId}`;
   try{
@@ -1490,11 +1565,17 @@ async function startAudioRecording(formKey, fieldId, onDone){
     const mimeType = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(preferredType)) ? preferredType : '';
     const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     mediaRecorder.ondataavailable = e => { if(e.data && e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+    mediaRecorder.onstop = async () => {
+      const rawBlob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
       stream.getTracks().forEach(t => t.stop());
       delete audioRecorderState[key];
-      onDone(blob);
+      try{
+        const mp3Blob = await convertBlobToMp3(rawBlob);
+        onDone(mp3Blob, true);
+      }catch(e){
+        console.error('MP3 conversion failed, using the original recording instead:', e);
+        onDone(rawBlob, false);
+      }
     };
     audioRecorderState[key] = { mediaRecorder, stream };
     mediaRecorder.start();
@@ -1531,8 +1612,9 @@ function wireAudioField(formKey, field, state, render){
 
   if(startBtn) startBtn.onclick = async () => {
     if(statusEl) statusEl.textContent = 'Requesting microphone access…';
-    const ok = await startAudioRecording(formKey, field.id, (blob) => {
-      const file = new File([blob], `recording_${Date.now()}.webm`, { type: blob.type || 'audio/webm' });
+    const ok = await startAudioRecording(formKey, field.id, (blob, isMp3) => {
+      const ext = isMp3 ? 'mp3' : (blob.type.includes('webm') ? 'webm' : blob.type.includes('mp4') ? 'm4a' : 'audio');
+      const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type || 'audio/mpeg' });
       setFile(file);
     });
     if(ok){
@@ -1547,7 +1629,7 @@ function wireAudioField(formKey, field, state, render){
     stopAudioRecording(formKey, field.id);
     stopBtn.style.display = 'none';
     if(startBtn) startBtn.style.display = '';
-    if(statusEl) statusEl.textContent = '';
+    if(statusEl) statusEl.textContent = 'Converting to MP3…';
   };
   if(uploadInput) uploadInput.onchange = e => { setFile(e.target.files[0] || null); };
   if(rerecordBtn) rerecordBtn.onclick = () => { setFile(null); };
@@ -2627,6 +2709,9 @@ function renderApplicationDetailModal(){
       return row(field.label, val);
     }).join('');
 
+  const hasAnyFile = Object.keys(a).some(k => k.endsWith('Url') && a[k]);
+  const showDeleteFilesBtn = isArchivedApplication(a) && hasAnyFile;
+
   return `
   <div class="modal-overlay" id="appDetailOverlay">
     <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
@@ -2647,6 +2732,11 @@ function renderApplicationDetailModal(){
 
       ${row('Email', a.email)}
       ${fieldsHtml}
+      ${showDeleteFilesBtn ? `
+      <div class="divider"></div>
+      <div style="font-size:11.5px; color:var(--slate-light); margin-bottom:8px;">This application is archived. You can free up storage by removing its attached files while keeping the record itself.</div>
+      <button class="btn btn-danger-outline btn-sm" id="appDeleteFilesBtn" style="width:auto;">🗑 Delete Attached Files</button>
+      ` : ''}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="appDetailCloseBtn">Close</button>
       </div>
@@ -4119,26 +4209,40 @@ function attachHandlers(){
       }
       state.busy = true; render();
       try{
-        await loadApplications();
         const emailNorm = (state.answers[emailField.id]||'').trim().toLowerCase();
-        const dupEmail = applications.some(a => (a.email||'').trim().toLowerCase()===emailNorm && !isArchivedApplication(a));
+        const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false };
+
+        // File uploads and the duplicate-email check used to run one after
+        // another — each file waiting for the previous one, and all of that
+        // waiting for a full read of the applications collection first. Now
+        // they all run at once: total wait time is however long the SLOWEST
+        // one takes, not the sum of all of them.
+        const uploadTasks = [];
+        for(const field of schema){
+          if(field.type === 'section' || field.type === 'image') continue;
+          if(field.type === 'file' || field.type === 'audio'){
+            const file = state.files[field.id];
+            if(file){
+              uploadTasks.push(uploadApplicationFile(file, applicationId, field.id).then(url => { record[field.id+'Url'] = url; }));
+            } else {
+              record[field.id+'Url'] = '';
+            }
+          } else {
+            const v = state.answers[field.id];
+            record[field.id] = typeof v === 'string' ? v.trim() : (v||'');
+          }
+        }
+        const dupCheckTask = loadApplications().then(() =>
+          applications.some(a => (a.email||'').trim().toLowerCase()===emailNorm && !isArchivedApplication(a))
+        );
+        const [dupEmail] = await Promise.all([dupCheckTask, ...uploadTasks]);
+
         if(dupEmail){
           state.busy = false;
           state.error = 'This email address has already been used to submit an application.';
           render();
           return;
-        }
-        const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-        const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false };
-        for(const field of schema){
-          if(field.type === 'section' || field.type === 'image') continue;
-          if(field.type === 'file' || field.type === 'audio'){
-            const file = state.files[field.id];
-            record[field.id+'Url'] = file ? await uploadApplicationFile(file, applicationId, field.id) : '';
-          } else {
-            const v = state.answers[field.id];
-            record[field.id] = typeof v === 'string' ? v.trim() : (v||'');
-          }
         }
         await saveOneApplication(record);
         state.busy = false; state.done = true; render();
@@ -4201,11 +4305,16 @@ function attachHandlers(){
       try{
         const signupId = 'signup_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
         const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false };
+        const uploadTasks = [];
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image' || field.type === 'notice') continue;
           if(field.type === 'file' || field.type === 'audio'){
             const file = state.files[field.id];
-            record[field.id+'Url'] = file ? await uploadEntityFile(file, 'accountSignups', signupId, field.id) : '';
+            if(file){
+              uploadTasks.push(uploadEntityFile(file, 'accountSignups', signupId, field.id).then(url => { record[field.id+'Url'] = url; }));
+            } else {
+              record[field.id+'Url'] = '';
+            }
           } else if(field.type === 'checkbox'){
             record[field.id] = !!state.answers[field.id];
           } else {
@@ -4213,6 +4322,7 @@ function attachHandlers(){
             record[field.id] = typeof v === 'string' ? v.trim() : (v||'');
           }
         }
+        await Promise.all(uploadTasks);
         await saveOneAccountSignup(record);
         state.busy = false; state.done = true; render();
       }catch(e){
@@ -4260,16 +4370,22 @@ function attachHandlers(){
       try{
         const deviceId = 'device_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
         const record = { id: deviceId, submittedAt: new Date().toISOString(), reviewed: false };
+        const uploadTasks = [];
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image') continue;
           if(field.type === 'file' || field.type === 'audio'){
             const file = state.files[field.id];
-            record[field.id+'Url'] = file ? await uploadEntityFile(file, 'deviceSubmissions', deviceId, field.id) : '';
+            if(file){
+              uploadTasks.push(uploadEntityFile(file, 'deviceSubmissions', deviceId, field.id).then(url => { record[field.id+'Url'] = url; }));
+            } else {
+              record[field.id+'Url'] = '';
+            }
           } else {
             const v = state.answers[field.id];
             record[field.id] = typeof v === 'string' ? v.trim() : (v||'');
           }
         }
+        await Promise.all(uploadTasks);
         await saveOneDeviceSubmission(record);
         state.busy = false; state.done = true; render();
       }catch(e){
@@ -5672,6 +5788,16 @@ Langdy Team`;
         const a = applications.find(x=>x.id===applicationDetailTarget);
         saveAppField({ result: (a && a.result==='fail') ? '' : 'fail' });
       };
+      const deleteFilesBtn = $('#appDeleteFilesBtn');
+      if(deleteFilesBtn) deleteFilesBtn.onclick = async () => {
+        const a = applications.find(x=>x.id===applicationDetailTarget);
+        if(!a) return;
+        if(!confirm('Delete all attached files (photos, recordings) for this application? The application record itself will stay — only the files are removed. This cannot be undone.')) return;
+        await deleteAttachedFiles(a);
+        const clearedUrls = {};
+        Object.keys(a).forEach(k => { if(k.endsWith('Url') && a[k]) clearedUrls[k] = ''; });
+        await saveAppField(clearedUrls);
+      };
     }
 
     if(reapplicationHistoryTarget){
@@ -5684,6 +5810,10 @@ Langdy Team`;
       $('#deleteTutorChatOverlay').onclick = (e) => { if(e.target.id==='deleteTutorChatOverlay'){ deleteTutorChatTarget=null; render(); } };
       $('#deleteTutorChatYesBtn').onclick = async () => {
         const id = deleteTutorChatTarget;
+        const booking = bookings.find(b => b.id === id);
+        if(booking && booking.messages){
+          await Promise.all(booking.messages.filter(m => m.fileUrl).map(m => deleteStorageFileByUrl(m.fileUrl)));
+        }
         const next = bookings.filter(b => b.id !== id);
         await saveBookings(next);
         deleteTutorChatTarget = null;
@@ -5753,8 +5883,10 @@ Langdy Team`;
         const text = chatInput.value;
         if(!text.trim()) return;
         chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
-        const updated = await sendChatMessage(chatTarget.id, 'admin', text);
-        if(updated) chatTarget = updated;
+        await sendChatMessage(chatTarget.id, 'admin', text);
+        // Don't manually touch chatTarget/bookings here — the real-time
+        // listener already watching this booking reflects the send moments
+        // after it lands, via its own onTick callback below.
         chatDraftText = '';
         chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
         render();
@@ -5781,8 +5913,7 @@ Langdy Team`;
         if(chatAttachBtn) chatAttachBtn.disabled = true;
         try{
           const url = await uploadEntityFile(file, 'bookings', chatTarget.id, 'chat_'+Date.now());
-          const updated = await sendChatMessage(chatTarget.id, 'admin', '', { url, name: file.name, type: file.type });
-          if(updated) chatTarget = updated;
+          await sendChatMessage(chatTarget.id, 'admin', '', { url, name: file.name, type: file.type });
           render();
           const freshThread = document.getElementById('chatThread');
           if(freshThread) freshThread.scrollTop = freshThread.scrollHeight;
@@ -5801,7 +5932,9 @@ Langdy Team`;
           const idx = bookings.findIndex(x=>x.id===bookingId);
           if(idx === -1) return;
           const msgs = [...(bookings[idx].messages||[])];
+          const deletedMsg = msgs[msgIndex];
           msgs.splice(msgIndex, 1);
+          if(deletedMsg && deletedMsg.fileUrl) await deleteStorageFileByUrl(deletedMsg.fileUrl);
           const updated = Object.assign({}, bookings[idx], { messages: msgs });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
