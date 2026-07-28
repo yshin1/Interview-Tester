@@ -1426,7 +1426,7 @@ function startBookingsPolling(){
   bookingsListenerActive = true;
   bookingsUnsubscribe = db.collection(BOOKINGS_COLLECTION).onSnapshot(snap => {
     bookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
       render();
     }
   }, err => console.error('Bookings listener error:', err));
@@ -2475,6 +2475,7 @@ function renderAdmin(){
     ${applicationDetailTarget ? renderApplicationDetailModal() : ''}
     ${reapplicationHistoryTarget ? renderReapplicationHistoryModal() : ''}
     ${deleteTutorChatTarget ? renderDeleteTutorChatModal() : ''}
+    ${addExistingTutorModalOpen ? renderAddExistingTutorModal() : ''}
   </div>`;
 }
 
@@ -3372,6 +3373,38 @@ let tutorChatsFilterUnreadOnly = false;
 let editingTutorChatLabelId = null;
 let tutorChatLabelDraft = '';
 
+// "Add Existing Tutor": lets admin onboard an already-hired tutor who never
+// went through this site's apply/demo pipeline. Creates a minimal booking
+// record (no actual demo date/time) marked as having passed the 2nd demo,
+// so the exact same invite flow used for everyone else works unchanged —
+// then immediately fires that invite instead of making admin hunt the new
+// record down in a list first.
+let addExistingTutorModalOpen = false;
+let addExistingTutorDraft = { fullName: '', email: '', error: '', busy: false };
+function renderAddExistingTutorModal(){
+  const d = addExistingTutorDraft;
+  return `
+  <div class="modal-overlay" id="addExistingTutorOverlay">
+    <div class="modal">
+      <h3>Add Existing Tutor</h3>
+      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">For tutors already working with us who never applied through this site. This creates their record and immediately sends them the same account-setup invite as everyone else.</p>
+      ${d.error ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⚠️</div><div class="txt">${escapeHtml(d.error)}</div></div>` : ''}
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" id="addExistingTutorName" value="${escapeHtml(d.fullName)}" placeholder="e.g. Amy">
+      </div>
+      <div class="field">
+        <label>Email Address</label>
+        <input type="email" id="addExistingTutorEmail" value="${escapeHtml(d.email)}" placeholder="name@example.com">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="addExistingTutorCancelBtn" ${d.busy?'disabled':''}>Cancel</button>
+        <button class="btn btn-primary" id="addExistingTutorSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Sending invite…':'Add & Send Invite'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function isFormerTutor(b){
   return b.tutorEmploymentStatus === 'resigned' || b.tutorEmploymentStatus === 'terminated';
 }
@@ -3492,7 +3525,9 @@ function renderAdminTutorChats(){
         <input type="checkbox" id="tutorChatsUnreadOnlyToggle" ${tutorChatsFilterUnreadOnly?'checked':''}>
         Unread only (${totalUnreadThreads})
       </label>
+      <button class="btn btn-gold btn-sm" id="openAddExistingTutorBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">+ Add Existing Tutor</button>
     </div>
+    <div class="section-desc" style="margin-bottom:14px;">Already-hired tutors who never went through this site's apply/demo pipeline can be added directly here — this creates their record and sends the same account invite as everyone else.</div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -5187,6 +5222,12 @@ Langdy Team`;
       }
       const toggle = $('#tutorChatsUnreadOnlyToggle');
       if(toggle) toggle.onchange = () => { tutorChatsFilterUnreadOnly = toggle.checked; render(); };
+      const openAddBtn = $('#openAddExistingTutorBtn');
+      if(openAddBtn) openAddBtn.onclick = () => {
+        addExistingTutorDraft = { fullName: '', email: '', error: '', busy: false };
+        addExistingTutorModalOpen = true;
+        render();
+      };
       $$('[data-edit-chat-label]').forEach(el=>{
         el.onclick = () => {
           const id = el.dataset.editChatLabel;
@@ -5869,6 +5910,80 @@ Langdy Team`;
         await saveBookings(next);
         deleteTutorChatTarget = null;
         render();
+      };
+    }
+
+    if(addExistingTutorModalOpen){
+      $('#addExistingTutorCancelBtn').onclick = () => { addExistingTutorModalOpen = false; render(); };
+      $('#addExistingTutorOverlay').onclick = (e) => { if(e.target.id==='addExistingTutorOverlay'){ addExistingTutorModalOpen = false; render(); } };
+      const nameInput = $('#addExistingTutorName');
+      const emailInput = $('#addExistingTutorEmail');
+      if(nameInput) nameInput.oninput = e => { addExistingTutorDraft.fullName = e.target.value; };
+      if(emailInput) emailInput.oninput = e => { addExistingTutorDraft.email = e.target.value; };
+      $('#addExistingTutorSubmitBtn').onclick = async () => {
+        const fullName = (addExistingTutorDraft.fullName||'').trim();
+        const email = (addExistingTutorDraft.email||'').trim();
+        if(!fullName){
+          addExistingTutorDraft.error = 'Please enter their full name.'; render(); return;
+        }
+        if(!isValidEmail(email)){
+          addExistingTutorDraft.error = 'Please enter a valid email address.'; render(); return;
+        }
+        const emailNorm = email.toLowerCase();
+        if(bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
+          addExistingTutorDraft.error = 'A record with this email already exists — check Tutor Chats, Archive, or the calendar.'; render(); return;
+        }
+        addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
+        try{
+          const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+          const newRecord = {
+            id: newId, fullName, email,
+            date: null, time: null,
+            secondDemoResult: 'pass', // treated as already having passed — same eligibility as anyone invited through the normal pipeline
+            existingTutor: true, // marks this as a directly-added existing tutor, not someone who went through apply/demo
+            tutorAccountCreated: false,
+            messages: [],
+            submittedAt: new Date().toISOString()
+          };
+          await saveBookings([...bookings, newRecord]);
+
+          // Immediately send the invite — same flow as the "📧 Invite"
+          // button elsewhere, just without making admin hunt this record
+          // down in a list first.
+          const tempPassword = await inviteTutorAccount(email);
+          const idx = bookings.findIndex(b => b.id === newId);
+          const updated = Object.assign({}, bookings[idx], { tutorAccountCreated: true });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+
+          const tutorLoginLink = window.location.origin + window.location.pathname + '?tutor';
+          const subject = "Your Langdy chat account is ready";
+          const body = `Hi ${fullName},
+
+We've set up an account so you can chat with us directly on the site from now on, instead of KakaoTalk.
+
+Login link: ${tutorLoginLink}
+Email: ${email}
+Temporary password: ${tempPassword}
+
+Please log in and feel free to change your password once you're in (under your account settings).
+
+Best,
+Langdy Team`;
+          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+          window.open(gmailUrl, '_blank');
+
+          addExistingTutorModalOpen = false;
+          addExistingTutorDraft = { fullName: '', email: '', error: '', busy: false };
+          render();
+        }catch(e){
+          console.error('ADD EXISTING TUTOR ERROR:', e);
+          addExistingTutorDraft.busy = false;
+          addExistingTutorDraft.error = e.code === 'auth/email-already-in-use'
+            ? 'An account already exists for this email.'
+            : 'Something went wrong creating the account. Please try again.';
+          render();
+        }
       };
     }
 
