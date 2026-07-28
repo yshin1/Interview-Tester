@@ -292,6 +292,7 @@
   .chat-bubble.mine{ align-self:flex-end; background:var(--navy); color:#fff; border-bottom-right-radius:4px; }
   .chat-bubble.theirs{ align-self:flex-start; background:#fff; border:1px solid var(--line); color:var(--ink); border-bottom-left-radius:4px; }
   .chat-bubble .who{ font-size:10.5px; font-weight:700; margin-bottom:2px; opacity:0.75; }
+  .chat-unread-badge{ font-size:11px; font-weight:700; color:var(--gold); margin-bottom:2px; flex-shrink:0; }
   .chat-input-row{ display:flex; gap:8px; padding:10px; border-top:1.5px solid var(--line); background:#fff; }
   .chat-input-row input{ flex:1; padding:10px 12px; border:1.5px solid var(--line); border-radius:9px; font-size:13.5px; font-family:inherit; }
   .chat-input-row button{ width:auto; padding:10px 18px; }
@@ -1170,24 +1171,49 @@ function renderChatFileAttachment(m){
   }
   return `<a href="${escapeHtml(m.fileUrl)}" target="_blank" rel="noopener" class="chat-file-link" style="display:flex; align-items:center; gap:6px; margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.06); text-decoration:none; color:inherit; font-size:12.5px;">📎 ${escapeHtml(name)}</a>`;
 }
-function renderChatThread(messages, viewerRole, bookingId){
+function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, theirName){
   const msgs = messages || [];
   if(msgs.length === 0){
     return `<div class="chat-empty">No messages yet. Say hello!</div>`;
   }
   const canDelete = viewerRole === 'admin';
+  // Only the LAST message admin sent gets an unread badge — matching how
+  // most chat apps (KakaoTalk included) only mark the latest message,
+  // since everything before it gets read together anyway.
+  let lastAdminMsgIndex = -1;
+  if(viewerRole === 'admin'){
+    for(let i = msgs.length - 1; i >= 0; i--){
+      if(msgs[i].from === 'admin'){ lastAdminMsgIndex = i; break; }
+    }
+  }
+  const readCutoff = lastReadByApplicant ? new Date(lastReadByApplicant) : null;
+
   return msgs.map((m, i) => {
     if(m.from === 'system'){
       return `<div class="chat-system">${linkify(escapeHtml(m.text))}</div>`;
     }
     const mine = m.from === viewerRole;
-    const who = m.from === 'admin' ? 'Recruiter' : 'You (applicant)';
+    const who = m.from === 'admin' ? 'Admin' : (theirName || 'Applicant');
     const time = new Date(m.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-    return `<div class="chat-bubble ${mine?'mine':'theirs'}">
+    let unreadBadge = '';
+    if(i === lastAdminMsgIndex){
+      const seen = readCutoff && new Date(m.at) <= readCutoff;
+      if(!seen) unreadBadge = `<span class="chat-unread-badge">1</span>`;
+    }
+    const bubble = `<div class="chat-bubble ${mine?'mine':'theirs'}">
       <div class="who">${mine ? 'You' : who}${canDelete ? ` <button class="link-btn" data-delete-msg="${escapeHtml(bookingId)}" data-msg-index="${i}" style="font-size:10.5px; padding:0; margin-left:6px; color:var(--danger);" title="Delete message">🗑</button>` : ''}</div>
       ${m.text ? linkify(escapeHtml(m.text).replace(/\n/g,'<br>')) : ''}
       ${renderChatFileAttachment(m)}
       <div class="t">${time}</div>
+    </div>`;
+    if(!unreadBadge) return bubble;
+    // Wrap in a row so the unread "1" sits just outside the bubble, on the
+    // side it's read from (left of a sent/mine bubble) — KakaoTalk-style,
+    // instead of a text label taking up room inside the bubble itself.
+    return `<div style="display:flex; align-items:flex-end; gap:4px; justify-content:${mine?'flex-end':'flex-start'};">
+      ${mine ? unreadBadge : ''}
+      ${bubble}
+      ${!mine ? unreadBadge : ''}
     </div>`;
   }).join('');
 }
@@ -1200,6 +1226,19 @@ async function markChatReadByAdmin(bookingId){
   await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByAdmin: now });
   const idx = bookings.findIndex(b => b.id === bookingId);
   if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByAdmin: now });
+}
+// Mirror of the above, but tracking whether the APPLICANT/TUTOR has seen the
+// ADMIN's messages — powers the "Seen" read-receipt shown under the
+// admin's own messages in the chat thread.
+function unreadCountForApplicant(b){
+  const lastRead = b.lastReadByApplicant ? new Date(b.lastReadByApplicant) : new Date(0);
+  return (b.messages||[]).filter(m => m.from==='admin' && new Date(m.at) > lastRead).length;
+}
+async function markChatReadByApplicant(bookingId){
+  const now = new Date().toISOString();
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByApplicant: now });
+  const idx = bookings.findIndex(b => b.id === bookingId);
+  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByApplicant: now });
 }
 
 // Guideline messages auto-sent once the applicant's chat message contains
@@ -1504,55 +1543,37 @@ function autoGrowTextarea(el){
 }
 function isValidFullName(v){ return v.trim().length>=2; }
 
-// In-browser voice recording for 'audio' type fields, using MediaRecorder.
-// Keyed by formKey+fieldId so multiple recorder widgets on the same page
-// (e.g. across forms) never interfere with each other.
+// In-browser voice recording for 'audio' type fields. Keyed by
+// formKey+fieldId so multiple recorder widgets on the same page (e.g.
+// across forms) never interfere with each other.
+//
+// Captures raw PCM samples directly via the Web Audio API as they're
+// spoken, instead of recording through MediaRecorder into a webm/mp4
+// container and decoding that back afterward. That record-then-decode
+// round trip was the actual cause of the silent-output bug: Chrome's
+// MediaRecorder containers (especially a single large chunk with no
+// timeslice) don't reliably carry proper duration/track metadata, and
+// decodeAudioData can "succeed" on them while producing empty or corrupted
+// audio data — which then encodes into a technically-valid but silent MP3.
+// Capturing the samples directly sidesteps that decode step entirely.
 const audioRecorderState = {};
 
-// Converts whatever MediaRecorder actually captured (webm/opus in Chrome,
-// mp4/aac in Safari, etc.) into a genuine MP3 file using lamejs. Browsers
-// don't support recording directly to MP3, and the recorded container
-// formats are sometimes inconsistent about playback/seek support outside
-// the browser that made them — decoding to raw audio and re-encoding to MP3
-// sidesteps both problems and gives a real, universally-playable .mp3.
-async function convertBlobToMp3(blob){
-  const arrayBuffer = await blob.arrayBuffer();
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const audioCtx = new AudioCtx();
-  let audioBuffer;
-  try{
-    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  }finally{
-    audioCtx.close();
+function encodeFloat32ToMp3(float32Samples, sampleRate){
+  const int16Samples = new Int16Array(float32Samples.length);
+  for(let i = 0; i < float32Samples.length; i++){
+    const s = Math.max(-1, Math.min(1, float32Samples[i]));
+    int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
-  const channels = Math.min(audioBuffer.numberOfChannels, 2);
-  const sampleRate = audioBuffer.sampleRate;
-  const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
-
-  const floatTo16BitPCM = (input) => {
-    const output = new Int16Array(input.length);
-    for(let i = 0; i < input.length; i++){
-      const s = Math.max(-1, Math.min(1, input[i]));
-      output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    return output;
-  };
-
-  const left = floatTo16BitPCM(audioBuffer.getChannelData(0));
-  const right = channels === 2 ? floatTo16BitPCM(audioBuffer.getChannelData(1)) : null;
-
+  const mp3Encoder = new lamejs.Mp3Encoder(1, sampleRate, 128);
   const sampleBlockSize = 1152; // multiple of 576, as lamejs expects
   const mp3Chunks = [];
-  for(let i = 0; i < left.length; i += sampleBlockSize){
-    const leftChunk = left.subarray(i, i + sampleBlockSize);
-    const mp3buf = right
-      ? mp3Encoder.encodeBuffer(leftChunk, right.subarray(i, i + sampleBlockSize))
-      : mp3Encoder.encodeBuffer(leftChunk);
-    if(mp3buf.length > 0) mp3Chunks.push(mp3buf);
+  for(let i = 0; i < int16Samples.length; i += sampleBlockSize){
+    const chunk = int16Samples.subarray(i, i + sampleBlockSize);
+    const buf = mp3Encoder.encodeBuffer(chunk);
+    if(buf.length > 0) mp3Chunks.push(buf);
   }
   const finalChunk = mp3Encoder.flush();
   if(finalChunk.length > 0) mp3Chunks.push(finalChunk);
-
   return new Blob(mp3Chunks, { type: 'audio/mpeg' });
 }
 
@@ -1560,25 +1581,25 @@ async function startAudioRecording(formKey, fieldId, onDone){
   const key = `${formKey}_${fieldId}`;
   try{
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const chunks = [];
-    const preferredType = 'audio/webm';
-    const mimeType = (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(preferredType)) ? preferredType : '';
-    const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => { if(e.data && e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = async () => {
-      const rawBlob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-      stream.getTracks().forEach(t => t.stop());
-      delete audioRecorderState[key];
-      try{
-        const mp3Blob = await convertBlobToMp3(rawBlob);
-        onDone(mp3Blob, true);
-      }catch(e){
-        console.error('MP3 conversion failed, using the original recording instead:', e);
-        onDone(rawBlob, false);
-      }
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx();
+    const source = audioCtx.createMediaStreamSource(stream);
+    // ScriptProcessorNode is deprecated but still fully functional in every
+    // current browser, and is far simpler to inline in a single HTML file
+    // than AudioWorklet (which needs a separate module file/URL).
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    const silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0; // keep the graph active without echoing the mic back to the speakers
+    const samples = [];
+
+    processor.onaudioprocess = (e) => {
+      samples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
     };
-    audioRecorderState[key] = { mediaRecorder, stream };
-    mediaRecorder.start();
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+
+    audioRecorderState[key] = { stream, audioCtx, source, processor, silentGain, samples, onDone };
     return true;
   }catch(e){
     console.error('Microphone access error:', e);
@@ -1588,7 +1609,27 @@ async function startAudioRecording(formKey, fieldId, onDone){
 function stopAudioRecording(formKey, fieldId){
   const key = `${formKey}_${fieldId}`;
   const rec = audioRecorderState[key];
-  if(rec && rec.mediaRecorder.state !== 'inactive') rec.mediaRecorder.stop();
+  if(!rec) return;
+  rec.processor.disconnect();
+  rec.source.disconnect();
+  rec.silentGain.disconnect();
+  rec.stream.getTracks().forEach(t => t.stop());
+  const sampleRate = rec.audioCtx.sampleRate;
+  const totalLength = rec.samples.reduce((sum, arr) => sum + arr.length, 0);
+  const combined = new Float32Array(totalLength);
+  let offset = 0;
+  for(const arr of rec.samples){ combined.set(arr, offset); offset += arr.length; }
+  rec.audioCtx.close();
+  const onDone = rec.onDone;
+  delete audioRecorderState[key];
+
+  try{
+    const mp3Blob = encodeFloat32ToMp3(combined, sampleRate);
+    onDone(mp3Blob, true);
+  }catch(e){
+    console.error('MP3 encoding failed:', e);
+    onDone(null, false);
+  }
 }
 // Wires up the record/stop/upload/re-record controls for one 'audio' field.
 // Shared across the Apply/Signup/Device forms so the MediaRecorder logic
@@ -1612,9 +1653,12 @@ function wireAudioField(formKey, field, state, render){
 
   if(startBtn) startBtn.onclick = async () => {
     if(statusEl) statusEl.textContent = 'Requesting microphone access…';
-    const ok = await startAudioRecording(formKey, field.id, (blob, isMp3) => {
-      const ext = isMp3 ? 'mp3' : (blob.type.includes('webm') ? 'webm' : blob.type.includes('mp4') ? 'm4a' : 'audio');
-      const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type || 'audio/mpeg' });
+    const ok = await startAudioRecording(formKey, field.id, (blob, success) => {
+      if(!success || !blob){
+        if(statusEl) statusEl.textContent = "Couldn't process that recording — please try again, or upload a file instead.";
+        return;
+      }
+      const file = new File([blob], `recording_${Date.now()}.mp3`, { type: 'audio/mpeg' });
       setFile(file);
     });
     if(ok){
@@ -1629,7 +1673,7 @@ function wireAudioField(formKey, field, state, render){
     stopAudioRecording(formKey, field.id);
     stopBtn.style.display = 'none';
     if(startBtn) startBtn.style.display = '';
-    if(statusEl) statusEl.textContent = 'Converting to MP3…';
+    if(statusEl) statusEl.textContent = 'Encoding to MP3…';
   };
   if(uploadInput) uploadInput.onchange = e => { setFile(e.target.files[0] || null); };
   if(rerecordBtn) rerecordBtn.onclick = () => { setFile(null); };
@@ -2300,12 +2344,13 @@ let chatDraftText = '';
 function renderChatPanel(bookingId, viewerRole){
   const b = bookings.find(x => x.id === bookingId);
   const messages = b ? (b.messages||[]) : [];
+  const theirName = b ? (b.adminChatLabel || b.fullName) : null;
   return `
   <div class="chat-panel">
-    <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId)}</div>
+    <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName)}</div>
     <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
     <div class="chat-input-row">
-      <button class="btn btn-ghost btn-sm" id="chatAttachBtn" type="button" style="width:auto; padding:10px 12px;" title="Attach a file">📎</button>
+      <button class="btn btn-ghost btn-sm" id="chatAttachBtn" type="button" style="width:auto; padding:10px 12px; display:flex; align-items:center; justify-content:center;" title="Attach a file"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48"></path></svg></button>
       <input type="file" id="chatFileInput" style="display:none;">
       <input type="text" id="chatInput" placeholder="Type a message…" autocomplete="off" value="${escapeHtml(chatDraftText)}">
       <button class="btn btn-gold" id="chatSendBtn">Send</button>
@@ -4680,7 +4725,13 @@ function attachHandlers(){
       chatFileInput.value = '';
       if(chatAttachBtn) chatAttachBtn.disabled = false;
     };
-    if(bk.id) startChatPolling(bk.id, () => { if(view==='book' && bk.done) renderPreservingChatScroll(); });
+    if(bk.id) startChatPolling(bk.id, async () => {
+      if(view==='book' && bk.done){
+        const fresh = bookings.find(b => b.id === bk.id);
+        if(fresh && unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
+        renderPreservingChatScroll();
+      }
+    });
     const doneClose = $('#doneClose');
     if(doneClose) doneClose.onclick = () => {
       stopChatPolling();
