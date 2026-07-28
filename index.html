@@ -3378,16 +3378,62 @@ let tutorChatLabelDraft = '';
 // record (no actual demo date/time) marked as having passed the 2nd demo,
 // so the exact same invite flow used for everyone else works unchanged —
 // then immediately fires that invite instead of making admin hunt the new
-// record down in a list first.
+// record down in a list first. Also supports pasting many at once (e.g.
+// copied straight out of a spreadsheet).
 let addExistingTutorModalOpen = false;
-let addExistingTutorDraft = { fullName: '', email: '', error: '', busy: false };
+let addExistingTutorDraft = { fullName: '', email: '', bulkText: '', error: '', busy: false };
+// Set once bulk processing finishes — an array of
+// {fullName, email, success, tempPassword, error}. Rendering switches to a
+// results view showing per-person invite buttons instead of auto-opening
+// every Gmail compose window at once, which browsers block as popups.
+let addExistingTutorResults = null;
+
+function parseBulkTutorLines(text){
+  return (text||'').split('\n').map(line => line.trim()).filter(Boolean).map(line => {
+    // Accept comma- or tab-separated "Name, email" — tab-separated is what
+    // you get pasting two spreadsheet columns directly.
+    const parts = line.includes('\t') ? line.split('\t') : line.split(',');
+    const fullName = (parts[0]||'').trim();
+    const email = (parts[1]||'').trim();
+    return { raw: line, fullName, email };
+  });
+}
+
 function renderAddExistingTutorModal(){
   const d = addExistingTutorDraft;
+
+  if(addExistingTutorResults){
+    const rows = addExistingTutorResults.map((r, i) => `
+      <div class="ticket-row" style="align-items:center;">
+        <span class="k" style="max-width:60%;">
+          <strong>${escapeHtml(r.fullName || r.raw)}</strong>
+          ${r.email ? `<br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(r.email)}</span>` : ''}
+        </span>
+        <span class="v">
+          ${r.success
+            ? `<button class="btn btn-primary btn-sm" style="width:auto;" data-open-invite-email="${i}">✉️ Open Invite Email</button>`
+            : `<span style="color:var(--danger); font-size:12px; font-weight:600;">⚠️ ${escapeHtml(r.error||'Failed')}</span>`}
+        </span>
+      </div>`).join('');
+    const successCount = addExistingTutorResults.filter(r=>r.success).length;
+    return `
+    <div class="modal-overlay" id="addExistingTutorOverlay">
+      <div class="modal" style="max-width:480px; max-height:82vh; overflow:auto;">
+        <h3>Accounts Created</h3>
+        <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">${successCount} of ${addExistingTutorResults.length} account(s) created. Click each person's button below to open their invite email one at a time (opening them all automatically gets blocked as popups).</p>
+        ${rows}
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="addExistingTutorDoneBtn">Done</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   return `
   <div class="modal-overlay" id="addExistingTutorOverlay">
-    <div class="modal">
+    <div class="modal" style="max-width:480px; max-height:82vh; overflow:auto;">
       <h3>Add Existing Tutor</h3>
-      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">For tutors already working with us who never applied through this site. This creates their record and immediately sends them the same account-setup invite as everyone else.</p>
+      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">For tutors already working with us who never applied through this site. This creates their record and account, ready to invite.</p>
       ${d.error ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⚠️</div><div class="txt">${escapeHtml(d.error)}</div></div>` : ''}
       <div class="field">
         <label>Full Name</label>
@@ -3400,6 +3446,16 @@ function renderAddExistingTutorModal(){
       <div class="modal-actions">
         <button class="btn btn-ghost" id="addExistingTutorCancelBtn" ${d.busy?'disabled':''}>Cancel</button>
         <button class="btn btn-primary" id="addExistingTutorSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Sending invite…':'Add & Send Invite'}</button>
+      </div>
+      <div class="divider"></div>
+      <div class="field">
+        <label>— or add several at once —</label>
+        <div style="font-size:11.5px; color:var(--slate-light); margin:-2px 0 6px;">One person per line: Name, email — or paste two columns straight from a spreadsheet.</div>
+        <textarea id="addExistingTutorBulkText" rows="5" placeholder="Amy Kim, amy@example.com
+Bob Lee, bob@example.com" style="resize:vertical; min-height:100px;">${escapeHtml(d.bulkText)}</textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="addExistingTutorBulkSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Processing…':'Add All'}</button>
       </div>
     </div>
   </div>`;
@@ -5914,13 +5970,68 @@ Langdy Team`;
     }
 
     if(addExistingTutorModalOpen){
-      $('#addExistingTutorCancelBtn').onclick = () => { addExistingTutorModalOpen = false; render(); };
-      $('#addExistingTutorOverlay').onclick = (e) => { if(e.target.id==='addExistingTutorOverlay'){ addExistingTutorModalOpen = false; render(); } };
+      const closeModal = () => {
+        addExistingTutorModalOpen = false;
+        addExistingTutorResults = null;
+        addExistingTutorDraft = { fullName: '', email: '', bulkText: '', error: '', busy: false };
+        render();
+      };
+      $('#addExistingTutorCancelBtn') && ($('#addExistingTutorCancelBtn').onclick = closeModal);
+      $('#addExistingTutorDoneBtn') && ($('#addExistingTutorDoneBtn').onclick = closeModal);
+      $('#addExistingTutorOverlay').onclick = (e) => { if(e.target.id==='addExistingTutorOverlay') closeModal(); };
+
+      // Shared by both the single-add button and the bulk-add flow — creates
+      // the minimal booking record, creates the Firebase account, and
+      // returns the temp password (or throws with a friendly message).
+      const createAndInviteExistingTutor = async (fullName, email) => {
+        const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const newRecord = {
+          id: newId, fullName, email,
+          date: null, time: null,
+          secondDemoResult: 'pass',
+          existingTutor: true,
+          tutorAccountCreated: false,
+          messages: [],
+          submittedAt: new Date().toISOString()
+        };
+        await saveBookings([...bookings, newRecord]);
+        const tempPassword = await inviteTutorAccount(email);
+        const idx = bookings.findIndex(b => b.id === newId);
+        const updated = Object.assign({}, bookings[idx], { tutorAccountCreated: true });
+        const next = [...bookings]; next[idx] = updated;
+        await saveBookings(next);
+        return tempPassword;
+      };
+      const buildInviteGmailUrl = (fullName, email, tempPassword) => {
+        const tutorLoginLink = window.location.origin + window.location.pathname + '?tutor';
+        const subject = "Your Langdy chat account is ready";
+        const body = `Hi ${fullName},
+
+We've set up an account so you can chat with us directly on the site from now on, instead of KakaoTalk.
+
+Login link: ${tutorLoginLink}
+Email: ${email}
+Temporary password: ${tempPassword}
+
+Please log in and feel free to change your password once you're in (under your account settings).
+
+Best,
+Langdy Team`;
+        return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      };
+
       const nameInput = $('#addExistingTutorName');
       const emailInput = $('#addExistingTutorEmail');
       if(nameInput) nameInput.oninput = e => { addExistingTutorDraft.fullName = e.target.value; };
       if(emailInput) emailInput.oninput = e => { addExistingTutorDraft.email = e.target.value; };
-      $('#addExistingTutorSubmitBtn').onclick = async () => {
+      const bulkTextarea = $('#addExistingTutorBulkText');
+      if(bulkTextarea){
+        autoGrowTextarea(bulkTextarea);
+        bulkTextarea.oninput = e => { addExistingTutorDraft.bulkText = e.target.value; };
+      }
+
+      const submitBtn = $('#addExistingTutorSubmitBtn');
+      if(submitBtn) submitBtn.onclick = async () => {
         const fullName = (addExistingTutorDraft.fullName||'').trim();
         const email = (addExistingTutorDraft.email||'').trim();
         if(!fullName){
@@ -5935,47 +6046,9 @@ Langdy Team`;
         }
         addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
         try{
-          const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-          const newRecord = {
-            id: newId, fullName, email,
-            date: null, time: null,
-            secondDemoResult: 'pass', // treated as already having passed — same eligibility as anyone invited through the normal pipeline
-            existingTutor: true, // marks this as a directly-added existing tutor, not someone who went through apply/demo
-            tutorAccountCreated: false,
-            messages: [],
-            submittedAt: new Date().toISOString()
-          };
-          await saveBookings([...bookings, newRecord]);
-
-          // Immediately send the invite — same flow as the "📧 Invite"
-          // button elsewhere, just without making admin hunt this record
-          // down in a list first.
-          const tempPassword = await inviteTutorAccount(email);
-          const idx = bookings.findIndex(b => b.id === newId);
-          const updated = Object.assign({}, bookings[idx], { tutorAccountCreated: true });
-          const next = [...bookings]; next[idx] = updated;
-          await saveBookings(next);
-
-          const tutorLoginLink = window.location.origin + window.location.pathname + '?tutor';
-          const subject = "Your Langdy chat account is ready";
-          const body = `Hi ${fullName},
-
-We've set up an account so you can chat with us directly on the site from now on, instead of KakaoTalk.
-
-Login link: ${tutorLoginLink}
-Email: ${email}
-Temporary password: ${tempPassword}
-
-Please log in and feel free to change your password once you're in (under your account settings).
-
-Best,
-Langdy Team`;
-          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-          window.open(gmailUrl, '_blank');
-
-          addExistingTutorModalOpen = false;
-          addExistingTutorDraft = { fullName: '', email: '', error: '', busy: false };
-          render();
+          const tempPassword = await createAndInviteExistingTutor(fullName, email);
+          window.open(buildInviteGmailUrl(fullName, email, tempPassword), '_blank');
+          closeModal();
         }catch(e){
           console.error('ADD EXISTING TUTOR ERROR:', e);
           addExistingTutorDraft.busy = false;
@@ -5985,6 +6058,49 @@ Langdy Team`;
           render();
         }
       };
+
+      const bulkSubmitBtn = $('#addExistingTutorBulkSubmitBtn');
+      if(bulkSubmitBtn) bulkSubmitBtn.onclick = async () => {
+        const parsed = parseBulkTutorLines(addExistingTutorDraft.bulkText);
+        if(parsed.length === 0){
+          addExistingTutorDraft.error = 'Paste at least one line as "Name, email".'; render(); return;
+        }
+        addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
+        const seenInBatch = new Set();
+        const results = [];
+        for(const row of parsed){
+          const fullName = row.fullName;
+          const email = row.email.trim();
+          const emailNorm = email.toLowerCase();
+          if(!fullName || !isValidEmail(email)){
+            results.push({ fullName: fullName || row.raw, email, success: false, error: 'Missing name or invalid email' });
+            continue;
+          }
+          if(seenInBatch.has(emailNorm) || bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
+            results.push({ fullName, email, success: false, error: 'Duplicate — already exists' });
+            continue;
+          }
+          seenInBatch.add(emailNorm);
+          try{
+            const tempPassword = await createAndInviteExistingTutor(fullName, email);
+            results.push({ fullName, email, success: true, tempPassword });
+          }catch(e){
+            console.error('BULK ADD EXISTING TUTOR ERROR:', fullName, email, e);
+            results.push({ fullName, email, success: false, error: e.code === 'auth/email-already-in-use' ? 'Account already exists' : 'Failed to create account' });
+          }
+        }
+        addExistingTutorDraft.busy = false;
+        addExistingTutorResults = results;
+        render();
+      };
+
+      $$('[data-open-invite-email]').forEach(el=>{
+        el.onclick = () => {
+          const r = addExistingTutorResults[Number(el.dataset.openInviteEmail)];
+          if(!r || !r.success) return;
+          window.open(buildInviteGmailUrl(r.fullName, r.email, r.tempPassword), '_blank');
+        };
+      });
     }
 
     if(adminTab==='archiveApplication'){
