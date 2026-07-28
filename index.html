@@ -1106,13 +1106,17 @@ async function deleteOneDeviceSubmission(id){
 async function sendChatMessage(bookingId, from, text){
   const trimmed = (text||'').trim();
   if(!trimmed) return null;
-  await loadBookings(); // fetch freshest data so we don't clobber messages from the other side
+  const msg = { from, text: trimmed, at: new Date().toISOString() };
+  // Atomic single-document update — no need to read the whole collection
+  // first just to append one message. arrayUnion is safe under concurrent
+  // writes from both sides of the chat at once.
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({
+    messages: firebase.firestore.FieldValue.arrayUnion(msg)
+  });
   const idx = bookings.findIndex(b => b.id === bookingId);
   if(idx === -1) return null;
-  const msg = { from, text: trimmed, at: new Date().toISOString() };
   const updated = Object.assign({}, bookings[idx], { messages: [...(bookings[idx].messages||[]), msg] });
-  const next = [...bookings]; next[idx] = updated;
-  await saveBookings(next);
+  bookings[idx] = updated;
   return updated;
 }
 // Turns any http(s) URL inside an already-escaped message into a clickable
@@ -1147,12 +1151,10 @@ function unreadCountForAdmin(b){
   return (b.messages||[]).filter(m => m.from==='applicant' && new Date(m.at) > lastRead).length;
 }
 async function markChatReadByAdmin(bookingId){
-  await loadBookings();
+  const now = new Date().toISOString();
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByAdmin: now });
   const idx = bookings.findIndex(b => b.id === bookingId);
-  if(idx === -1) return;
-  const updated = Object.assign({}, bookings[idx], { lastReadByAdmin: new Date().toISOString() });
-  const next = [...bookings]; next[idx] = updated;
-  await saveBookings(next);
+  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByAdmin: now });
 }
 
 // Guideline messages auto-sent once the applicant's chat message contains
@@ -1224,19 +1226,28 @@ async function sendGuidelineMessagesWithDelay(bookingId, dateLabel, time){
 }
 
 let chatPollBookingId = null;
-let chatPollTimer = null;
+let chatUnsubscribe = null;
+// Real-time listener on just the ONE booking being viewed, instead of
+// re-reading the entire bookings collection every few seconds. Firestore
+// only bills for what actually changed after the initial snapshot, so a
+// chat window left open no longer costs a full-collection read every tick.
 function startChatPolling(bookingId, onTick){
-  if(chatPollBookingId === bookingId) return; // already polling this thread
+  if(chatPollBookingId === bookingId) return; // already listening to this thread
   stopChatPolling();
   chatPollBookingId = bookingId;
-  chatPollTimer = setInterval(async () => {
-    await loadBookings();
+  chatUnsubscribe = db.collection(BOOKINGS_COLLECTION).doc(bookingId).onSnapshot(doc => {
+    if(!doc.exists) return;
+    const updated = Object.assign({ id: doc.id }, doc.data());
+    const idx = bookings.findIndex(b => b.id === bookingId);
+    if(idx !== -1) bookings[idx] = updated; else bookings.push(updated);
     onTick();
-  }, 3000);
+  }, err => {
+    console.error('Chat listener error:', err);
+  });
 }
 function stopChatPolling(){
-  if(chatPollTimer) clearInterval(chatPollTimer);
-  chatPollTimer = null;
+  if(chatUnsubscribe) chatUnsubscribe();
+  chatUnsubscribe = null;
   chatPollBookingId = null;
 }
 
@@ -1244,10 +1255,11 @@ function stopChatPolling(){
 // without needing to log out/in again. Skips re-rendering while a modal is
 // open (detail view, delete confirm) so it doesn't interrupt active edits —
 // it still fetches in the background and catches up on the next render.
-let appsPollTimer = null;
+let appsUnsubscribe = null;
+let appsListenerActive = false;
 // Shared guard: true while the person is actively focused on any form
 // control (a dropdown they just opened, a text field, etc). Used by every
-// polling loop below so an auto-refresh never interrupts an in-progress
+// listener below so an auto-refresh never interrupts an in-progress
 // selection or edit — including native <select> dropdowns, which don't
 // have their own "is this open" state we can check directly.
 function isFormControlFocused(){
@@ -1255,67 +1267,92 @@ function isFormControlFocused(){
   return !!el && ['SELECT','INPUT','TEXTAREA'].includes(el.tagName);
 }
 
+// All four of these switched from setInterval-based polling (re-reading the
+// entire collection every few seconds regardless of whether anything
+// changed) to Firestore's real-time listeners. Firestore only bills for
+// documents that actually changed after the initial snapshot, so this scales
+// with actual activity instead of with (collection size × how long the tab
+// stays open) — the same UI, but far cheaper as data grows, and updates
+// arrive instantly instead of on the next poll tick.
+//
+// The "active" flag is set BEFORE calling onSnapshot (not after, from its
+// return value) — onSnapshot's first callback can fire synchronously, and
+// that callback re-renders, which re-runs this same start function; without
+// a guard set up-front, that re-entrant call wouldn't yet see an assigned
+// unsubscribe handle and would subscribe a second time, recursing forever.
 function startApplicationsPolling(){
-  if(appsPollTimer) return;
-  appsPollTimer = setInterval(async () => {
-    await loadApplications();
+  if(appsListenerActive) return;
+  appsListenerActive = true;
+  appsUnsubscribe = adminDb.collection(APPLICATIONS_COLLECTION).onSnapshot(snap => {
+    applications = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !deleteApplicationTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
-  }, 4000);
+  }, err => console.error('Applications listener error:', err));
 }
 function stopApplicationsPolling(){
-  if(appsPollTimer) clearInterval(appsPollTimer);
-  appsPollTimer = null;
+  if(appsUnsubscribe) appsUnsubscribe();
+  appsUnsubscribe = null;
+  appsListenerActive = false;
 }
 
-let signupsPollTimer = null;
+let signupsUnsubscribe = null;
+let signupsListenerActive = false;
 function startSignupsPolling(){
-  if(signupsPollTimer) return;
-  signupsPollTimer = setInterval(async () => {
-    await loadAccountSignups();
+  if(signupsListenerActive) return;
+  signupsListenerActive = true;
+  signupsUnsubscribe = adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).onSnapshot(snap => {
+    accountSignups = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && adminTab==='accountSignups' && !accountSignupDetailTarget && !deleteAccountSignupTarget && !isFormControlFocused()){
       render();
     }
-  }, 4000);
+  }, err => console.error('Account signups listener error:', err));
 }
 function stopSignupsPolling(){
-  if(signupsPollTimer) clearInterval(signupsPollTimer);
-  signupsPollTimer = null;
+  if(signupsUnsubscribe) signupsUnsubscribe();
+  signupsUnsubscribe = null;
+  signupsListenerActive = false;
 }
 
-let devicePollTimer = null;
+let deviceUnsubscribe = null;
+let deviceListenerActive = false;
 function startDevicePolling(){
-  if(devicePollTimer) return;
-  devicePollTimer = setInterval(async () => {
-    await loadDeviceSubmissions();
+  if(deviceListenerActive) return;
+  deviceListenerActive = true;
+  deviceUnsubscribe = adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).onSnapshot(snap => {
+    deviceSubmissions = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && adminTab==='deviceSubmissions' && !deviceSubmissionDetailTarget && !deleteDeviceSubmissionTarget && !isFormControlFocused()){
       render();
     }
-  }, 4000);
+  }, err => console.error('Device submissions listener error:', err));
 }
 function stopDevicePolling(){
-  if(devicePollTimer) clearInterval(devicePollTimer);
-  devicePollTimer = null;
+  if(deviceUnsubscribe) deviceUnsubscribe();
+  deviceUnsubscribe = null;
+  deviceListenerActive = false;
 }
 
-// Same idea, but for the 1st-demo bookings (Calendar/List tabs) — auto-refresh
-// so new bookings/chat activity show up without needing to log out/in again.
-// Skips re-rendering while any modal is open (edit, cancel, chat) so it
-// doesn't interrupt an active edit; it still fetches in the background.
-let bookingsPollTimer = null;
+// Same idea, but for bookings — covers Calendar/List/2nd Demo/Onboarding/
+// Chats/Tutor Chats/Archive tabs, all of which read from the same
+// collection. Skips re-rendering while any modal is open (edit, cancel,
+// chat) so it doesn't interrupt an active edit; it still updates the local
+// cache in the background either way.
+let bookingsUnsubscribe = null;
+let bookingsListenerActive = false;
 function startBookingsPolling(){
-  if(bookingsPollTimer) return;
-  bookingsPollTimer = setInterval(async () => {
-    await loadBookings();
+  if(bookingsListenerActive) return;
+  bookingsListenerActive = true;
+  bookingsUnsubscribe = db.collection(BOOKINGS_COLLECTION).onSnapshot(snap => {
+    bookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
-  }, 4000);
+  }, err => console.error('Bookings listener error:', err));
 }
 function stopBookingsPolling(){
-  if(bookingsPollTimer) clearInterval(bookingsPollTimer);
-  bookingsPollTimer = null;
+  if(bookingsUnsubscribe) bookingsUnsubscribe();
+  bookingsUnsubscribe = null;
+  bookingsListenerActive = false;
 }
 
 // Re-renders while preserving the chat thread's scroll position — only
@@ -4485,7 +4522,7 @@ function attachHandlers(){
       stopDevicePolling();
     }
 
-    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats'){
+    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
       startBookingsPolling();
     } else {
       stopBookingsPolling();
