@@ -1860,7 +1860,7 @@ let currentTutorUser = null;
 let tutorLoginEmail = '';
 let tutorLoginError = '';
 let tutorLoginBusy = false;
-let tutorSignupDraft = { code: '', fullName: '', email: '', password: '', error: '', busy: false };
+let tutorSignupDraft = { code: '', fullName: '', tutorName: '', tutorId: '', email: '', password: '', error: '', busy: false };
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorNameEditState = { value:'', error:'', success:'', busy:false };
@@ -1931,6 +1931,14 @@ function renderGate(){
         <div class="field">
           <label for="tutorSignupNameInput">Full Name</label>
           <input type="text" id="tutorSignupNameInput" placeholder="Your name" autocomplete="name" value="${escapeHtml(d.fullName)}" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupTutorNameInput">Tutor Name <span style="color:var(--slate-light); font-weight:400;">(the name shown to students)</span></label>
+          <input type="text" id="tutorSignupTutorNameInput" placeholder="e.g. Amy" value="${escapeHtml(d.tutorName)}" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupTutorIdInput">Tutor ID</label>
+          <input type="text" id="tutorSignupTutorIdInput" placeholder="e.g. AMY123" value="${escapeHtml(d.tutorId)}" ${d.busy?'disabled':''}>
         </div>
         <div class="field">
           <label for="tutorSignupEmailInput">Email</label>
@@ -4688,15 +4696,23 @@ function attachHandlers(){
         const d = tutorSignupDraft;
         const code = $('#tutorSignupCodeInput').value.trim();
         const fullName = $('#tutorSignupNameInput').value.trim();
+        const tutorName = $('#tutorSignupTutorNameInput').value.trim();
+        const tutorId = $('#tutorSignupTutorIdInput').value.trim();
         const email = $('#tutorSignupEmailInput').value.trim();
         const password = $('#tutorSignupPasswordInput').value;
-        d.code = code; d.fullName = fullName; d.email = email;
+        d.code = code; d.fullName = fullName; d.tutorName = tutorName; d.tutorId = tutorId; d.email = email;
 
         if(code !== config.existingTutorCode){
           d.error = 'That access code is not valid.'; render(); return;
         }
         if(!fullName){
           d.error = 'Please enter your full name.'; render(); return;
+        }
+        if(!tutorName){
+          d.error = 'Please enter your tutor name.'; render(); return;
+        }
+        if(!tutorId){
+          d.error = 'Please enter your tutor ID.'; render(); return;
         }
         if(!isValidEmail(email)){
           d.error = 'Please enter a valid email address.'; render(); return;
@@ -4713,7 +4729,11 @@ function attachHandlers(){
         d.busy = true; d.error = ''; render();
         const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
         const newRecord = {
-          id: newId, fullName, email,
+          id: newId, fullName, email, tutorName, tutorId,
+          // Chat display name is auto-set to "TutorName(TutorID)" — this is
+          // the same field the admin can otherwise edit by hand from Tutor
+          // Chats, so it shows up everywhere that already reads it.
+          adminChatLabel: `${tutorName}(${tutorId})`,
           date: null, time: null,
           secondDemoResult: 'pass',
           existingTutor: true,
@@ -4747,9 +4767,11 @@ function attachHandlers(){
       $('#tutorSignupPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
       $('#tutorSignupCodeInput').oninput = e => { tutorSignupDraft.code = e.target.value; };
       $('#tutorSignupNameInput').oninput = e => { tutorSignupDraft.fullName = e.target.value; };
+      $('#tutorSignupTutorNameInput').oninput = e => { tutorSignupDraft.tutorName = e.target.value; };
+      $('#tutorSignupTutorIdInput').oninput = e => { tutorSignupDraft.tutorId = e.target.value; };
       $('#tutorSignupEmailInput').oninput = e => { tutorSignupDraft.email = e.target.value; };
       const signupBackLink = $('#gateSwitchToTutorLoginFromSignup');
-      if(signupBackLink) signupBackLink.onclick = () => { gateMode='tutorLogin'; tutorSignupDraft={ code:'', fullName:'', email:'', password:'', error:'', busy:false }; render(); };
+      if(signupBackLink) signupBackLink.onclick = () => { gateMode='tutorLogin'; tutorSignupDraft={ code:'', fullName:'', tutorName:'', tutorId:'', email:'', password:'', error:'', busy:false }; render(); };
     } else {
       const submit = async () => {
         const email = $('#findEmailInput').value.trim();
