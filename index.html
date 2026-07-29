@@ -736,6 +736,7 @@ function freshDayCapacity(){ return Object.fromEntries(SLOTS.map(s => [s.time, 1
 const DEFAULT_CONFIG = {
   applicantCode: 'WELCOME2026',
   adminCode: 'ADMIN0000',
+  existingTutorCode: 'TUTOR2026',
   slotCapacity: Object.fromEntries(WEEKDAY_NUMS.map(d => [d, freshDayCapacity()])),
   closedDates: []
 };
@@ -815,7 +816,7 @@ let datesMonthOffset = 0;
 let editingBooking = null;   // booking object being reassigned by admin
 let chatTarget = null;       // booking whose chat modal is open (admin side)
 let editDate = null, editTime = null, editError = '';
-let codeChangeState = { newApplicant:'', error:'', success:'', busy:false };
+let codeChangeState = { newApplicant:'', newExistingTutor:'', error:'', success:'', busy:false };
 let capacityDraft = null;
 let capacityDayTab = 1; // 1=Mon .. 5=Fri
 let capacitySaving = false;
@@ -964,6 +965,7 @@ async function loadConfig(){
       parsed.slotCapacity = merged;
       parsed.closedDates = parsed.closedDates || [];
       if(!parsed.adminCode) parsed.adminCode = DEFAULT_CONFIG.adminCode; // safety net if an in-progress login-based config was saved
+      if(!parsed.existingTutorCode) parsed.existingTutorCode = DEFAULT_CONFIG.existingTutorCode; // safety net for configs saved before this code existed
       config = parsed;
     } else {
       config = DEFAULT_CONFIG;
@@ -1858,6 +1860,7 @@ let currentTutorUser = null;
 let tutorLoginEmail = '';
 let tutorLoginError = '';
 let tutorLoginBusy = false;
+let tutorSignupDraft = { code: '', fullName: '', email: '', password: '', error: '', busy: false };
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorNameEditState = { value:'', error:'', success:'', busy:false };
@@ -1910,6 +1913,36 @@ function renderGate(){
         <button class="btn btn-primary" id="tutorLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
         ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
         <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:14px;">← Back to access code</button>
+      </div>
+    </div>`;
+  }
+  if(gateMode === 'tutorSignup'){
+    const d = tutorSignupDraft;
+    return `
+    <div class="center-screen">
+      <div class="card gate-card">
+        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <h1 class="gate-title">Tutor Sign Up</h1>
+        <p class="gate-sub">For tutors already working with us who don't have a chat account yet. You'll need the access code shared with the team.</p>
+        <div class="field">
+          <label for="tutorSignupCodeInput">Access Code</label>
+          <input type="text" id="tutorSignupCodeInput" placeholder="Access code" autocomplete="off" value="${escapeHtml(d.code)}" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupNameInput">Full Name</label>
+          <input type="text" id="tutorSignupNameInput" placeholder="Your name" autocomplete="name" value="${escapeHtml(d.fullName)}" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupEmailInput">Email</label>
+          <input type="email" id="tutorSignupEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(d.email)}" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupPasswordInput">Choose a Password</label>
+          <input type="password" id="tutorSignupPasswordInput" placeholder="At least 6 characters" autocomplete="new-password" ${d.busy?'disabled':''}>
+        </div>
+        <button class="btn btn-primary" id="tutorSignupSubmit" ${d.busy?'disabled':''}>${d.busy?'Creating account…':'Create Account'}</button>
+        ${d.error ? `<div class="error-text">${escapeHtml(d.error)}</div>` : ''}
+        <button class="find-link" id="gateSwitchToTutorLoginFromSignup" style="display:block; margin-top:14px;">Already have an account? Sign in</button>
       </div>
     </div>`;
   }
@@ -3416,11 +3449,13 @@ function renderAddExistingTutorModal(){
         </span>
       </div>`).join('');
     const successCount = addExistingTutorResults.filter(r=>r.success).length;
+    const hitRateLimit = addExistingTutorResults.some(r => (r.error||'').includes('limit reached'));
     return `
     <div class="modal-overlay" id="addExistingTutorOverlay">
       <div class="modal" style="max-width:480px; max-height:82vh; overflow:auto;">
         <h3>Accounts Created</h3>
         <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">${successCount} of ${addExistingTutorResults.length} account(s) created. Click each person's button below to open their invite email one at a time (opening them all automatically gets blocked as popups).</p>
+        ${hitRateLimit ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⏳</div><div class="txt">Firebase limits new account creation to 100 per hour from this connection. The rest weren't attempted — paste their names again in about an hour to finish.</div></div>` : ''}
         ${rows}
         <div class="modal-actions">
           <button class="btn btn-primary" id="addExistingTutorDoneBtn">Done</button>
@@ -4179,6 +4214,16 @@ function renderAdminCodes(){
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
     ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
+  </div>
+  <div class="card">
+    <div class="section-title">Existing Tutor Sign-Up Code</div>
+    <div class="section-desc">Share this link + code privately with already-hired tutors so they can create their own chat login without going through the apply/demo pipeline: <strong>${escapeHtml(window.location.origin + window.location.pathname)}?tutor-signup</strong></div>
+
+    <div class="field">
+      <label>New Sign-Up Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.existingTutorCode)})</span></label>
+      <input type="text" id="newExistingTutorCodeInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newExistingTutor)}">
+    </div>
+    <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="tutorCodeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
   </div>`;
 }
 
@@ -4638,6 +4683,73 @@ function attachHandlers(){
       (tutorLoginEmail ? $('#tutorLoginPasswordInput') : $('#tutorLoginEmailInput')).focus();
       const tutorBackLink = $('#gateSwitchToCodeFromTutor');
       if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; render(); };
+    } else if(gateMode==='tutorSignup'){
+      const submit = async () => {
+        const d = tutorSignupDraft;
+        const code = $('#tutorSignupCodeInput').value.trim();
+        const fullName = $('#tutorSignupNameInput').value.trim();
+        const email = $('#tutorSignupEmailInput').value.trim();
+        const password = $('#tutorSignupPasswordInput').value;
+        d.code = code; d.fullName = fullName; d.email = email;
+
+        if(code !== config.existingTutorCode){
+          d.error = 'That access code is not valid.'; render(); return;
+        }
+        if(!fullName){
+          d.error = 'Please enter your full name.'; render(); return;
+        }
+        if(!isValidEmail(email)){
+          d.error = 'Please enter a valid email address.'; render(); return;
+        }
+        if(!password || password.length < 6){
+          d.error = 'Password must be at least 6 characters.'; render(); return;
+        }
+        await loadBookings();
+        const emailNorm = email.toLowerCase();
+        if(bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
+          d.error = 'An account with this email already exists — try signing in instead.'; render(); return;
+        }
+
+        d.busy = true; d.error = ''; render();
+        const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const newRecord = {
+          id: newId, fullName, email,
+          date: null, time: null,
+          secondDemoResult: 'pass',
+          existingTutor: true,
+          tutorAccountCreated: true, // set true up front since we're creating their own login right now
+          messages: [],
+          submittedAt: new Date().toISOString()
+        };
+        try{
+          // Create the booking record FIRST — createUserWithEmailAndPassword
+          // signs them in immediately and fires onAuthStateChanged, which
+          // looks up a matching booking by email right away. If that lookup
+          // ran before this record existed, they'd be told "no booking
+          // found" and get signed back out.
+          await saveBookings([...bookings, newRecord]);
+          await firebase.auth().createUserWithEmailAndPassword(email, password);
+          // onAuthStateChanged (set up in init) takes it from here — finds
+          // the booking above and switches straight to the chat view.
+        }catch(e){
+          console.error('TUTOR SIGNUP ERROR:', e);
+          // Roll back the booking record so a failed signup doesn't leave an
+          // orphaned entry with no matching account behind.
+          await saveBookings(bookings.filter(b => b.id !== newId));
+          d.busy = false;
+          d.error = e.code === 'auth/email-already-in-use'
+            ? 'An account with this email already exists — try signing in instead.'
+            : 'Something went wrong creating your account. Please try again.';
+          render();
+        }
+      };
+      $('#tutorSignupSubmit').onclick = submit;
+      $('#tutorSignupPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#tutorSignupCodeInput').oninput = e => { tutorSignupDraft.code = e.target.value; };
+      $('#tutorSignupNameInput').oninput = e => { tutorSignupDraft.fullName = e.target.value; };
+      $('#tutorSignupEmailInput').oninput = e => { tutorSignupDraft.email = e.target.value; };
+      const signupBackLink = $('#gateSwitchToTutorLoginFromSignup');
+      if(signupBackLink) signupBackLink.onclick = () => { gateMode='tutorLogin'; tutorSignupDraft={ code:'', fullName:'', email:'', password:'', error:'', busy:false }; render(); };
     } else {
       const submit = async () => {
         const email = $('#findEmailInput').value.trim();
@@ -5832,6 +5944,20 @@ Langdy Team`;
         render();
       };
 
+      $('#newExistingTutorCodeInput').oninput = e => { codeChangeState.newExistingTutor = e.target.value; };
+      $('#tutorCodeSaveBtn').onclick = async () => {
+        const s = codeChangeState;
+        s.error=''; s.success='';
+        if(!s.newExistingTutor.trim()){
+          s.error = 'Enter a new sign-up code to change.'; render(); return;
+        }
+        s.busy = true; render();
+        const next = Object.assign({}, config, { existingTutorCode: s.newExistingTutor.trim() });
+        await saveConfig(next);
+        s.busy=false; s.success='Existing tutor sign-up code updated successfully.'; s.newExistingTutor='';
+        render();
+      };
+
       $('#cpCurrentInput').oninput = e => { changePasswordState.currentPassword = e.target.value; };
       $('#cpNewInput').oninput = e => { changePasswordState.newPassword = e.target.value; };
       $('#cpConfirmInput').oninput = e => { changePasswordState.confirmPassword = e.target.value; };
@@ -6068,7 +6194,17 @@ Langdy Team`;
         addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
         const seenInBatch = new Set();
         const results = [];
+        // Firebase caps new account creation at 100 per hour per IP address
+        // (a client-side anti-abuse limit, not something we can raise without
+        // a paid backend). If we hit it mid-batch, every remaining attempt
+        // would fail the same way, so stop immediately instead of burning
+        // through the rest of the list with the same error.
+        let rateLimited = false;
         for(const row of parsed){
+          if(rateLimited){
+            results.push({ fullName: row.fullName || row.raw, email: row.email, success: false, error: "Not attempted — hourly limit reached" });
+            continue;
+          }
           const fullName = row.fullName;
           const email = row.email.trim();
           const emailNorm = email.toLowerCase();
@@ -6086,6 +6222,11 @@ Langdy Team`;
             results.push({ fullName, email, success: true, tempPassword });
           }catch(e){
             console.error('BULK ADD EXISTING TUTOR ERROR:', fullName, email, e);
+            if(e.code === 'auth/too-many-requests'){
+              rateLimited = true;
+              results.push({ fullName, email, success: false, error: "Hourly account-creation limit reached — try again in about an hour" });
+              continue;
+            }
             results.push({ fullName, email, success: false, error: e.code === 'auth/email-already-in-use' ? 'Account already exists' : 'Failed to create account' });
           }
         }
@@ -6284,6 +6425,7 @@ Langdy Team`;
   else if(params.has('device')) view = 'deviceForm';
   else if(params.has('admin')){ gateMode = 'adminLogin'; cameFromAdminLink = true; }
   else if(params.has('tutor')){ gateMode = 'tutorLogin'; cameFromTutorLink = true; }
+  else if(params.has('tutor-signup')){ gateMode = 'tutorSignup'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
   // Admin and tutor now each get their own Firebase Auth instance (see
