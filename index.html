@@ -1938,7 +1938,7 @@ function renderGate(){
         </div>
         <div class="field">
           <label for="tutorSignupTutorIdInput">Tutor ID</label>
-          <input type="text" id="tutorSignupTutorIdInput" placeholder="e.g. AMY123" value="${escapeHtml(d.tutorId)}" ${d.busy?'disabled':''}>
+          <input type="text" id="tutorSignupTutorIdInput" inputmode="numeric" placeholder="e.g. 123456" value="${escapeHtml(d.tutorId)}" ${d.busy?'disabled':''}>
         </div>
         <div class="field">
           <label for="tutorSignupEmailInput">Email</label>
@@ -4713,6 +4713,9 @@ function attachHandlers(){
         }
         if(!tutorId){
           d.error = 'Please enter your tutor ID.'; render(); return;
+        }
+        if(!/^\d+$/.test(tutorId)){
+          d.error = 'Tutor ID should be numbers only.'; render(); return;
         }
         if(!isValidEmail(email)){
           d.error = 'Please enter a valid email address.'; render(); return;
