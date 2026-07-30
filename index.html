@@ -1860,6 +1860,7 @@ let currentTutorUser = null;
 let tutorLoginEmail = '';
 let tutorLoginError = '';
 let tutorLoginBusy = false;
+let tutorForgotPasswordState = { email: '', error: '', success: '', busy: false };
 let tutorSignupDraft = { code: '', fullName: '', tutorName: '', tutorId: '', email: '', password: '', error: '', busy: false };
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
@@ -1912,7 +1913,27 @@ function renderGate(){
         </div>
         <button class="btn btn-primary" id="tutorLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
         ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
-        <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:14px;">← Back to access code</button>
+        <button class="find-link" id="gateSwitchToForgotPassword" style="display:block; margin-top:14px;">Forgot your password?</button>
+        <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:8px;">← Back to access code</button>
+      </div>
+    </div>`;
+  }
+  if(gateMode === 'tutorForgotPassword'){
+    const s = tutorForgotPasswordState;
+    return `
+    <div class="center-screen">
+      <div class="card gate-card">
+        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <h1 class="gate-title">Reset Password</h1>
+        <p class="gate-sub">Enter your account email and we'll send you a link to set a new password.</p>
+        <div class="field">
+          <label for="tutorForgotEmailInput">Email</label>
+          <input type="email" id="tutorForgotEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(s.email)}" ${s.busy?'disabled':''}>
+        </div>
+        <button class="btn btn-primary" id="tutorForgotSubmit" ${s.busy?'disabled':''}>${s.busy?'Sending…':'Send Reset Link'}</button>
+        ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
+        ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
+        <button class="find-link" id="gateSwitchToTutorLoginFromForgot" style="display:block; margin-top:14px;">← Back to sign in</button>
       </div>
     </div>`;
   }
@@ -1947,6 +1968,10 @@ function renderGate(){
         <div class="field">
           <label for="tutorSignupPasswordInput">Choose a Password</label>
           <input type="password" id="tutorSignupPasswordInput" placeholder="At least 6 characters" autocomplete="new-password" ${d.busy?'disabled':''}>
+        </div>
+        <div class="field">
+          <label for="tutorSignupPasswordConfirmInput">Confirm Password</label>
+          <input type="password" id="tutorSignupPasswordConfirmInput" placeholder="Re-enter your password" autocomplete="new-password" ${d.busy?'disabled':''}>
         </div>
         <button class="btn btn-primary" id="tutorSignupSubmit" ${d.busy?'disabled':''}>${d.busy?'Creating account…':'Create Account'}</button>
         ${d.error ? `<div class="error-text">${escapeHtml(d.error)}</div>` : ''}
@@ -4691,6 +4716,42 @@ function attachHandlers(){
       (tutorLoginEmail ? $('#tutorLoginPasswordInput') : $('#tutorLoginEmailInput')).focus();
       const tutorBackLink = $('#gateSwitchToCodeFromTutor');
       if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; render(); };
+      const forgotLink = $('#gateSwitchToForgotPassword');
+      if(forgotLink) forgotLink.onclick = () => {
+        tutorForgotPasswordState = { email: tutorLoginEmail, error: '', success: '', busy: false };
+        gateMode = 'tutorForgotPassword';
+        render();
+      };
+    } else if(gateMode==='tutorForgotPassword'){
+      const submit = async () => {
+        const s = tutorForgotPasswordState;
+        const email = $('#tutorForgotEmailInput').value.trim();
+        s.email = email; s.success = '';
+        if(!isValidEmail(email)){
+          s.error = 'Please enter a valid email address.'; render(); return;
+        }
+        s.busy = true; s.error = ''; render();
+        try{
+          await firebase.auth().sendPasswordResetEmail(email);
+          // Deliberately the same success message regardless of whether the
+          // email is actually registered — confirming or denying an account
+          // exists here would let someone probe which emails have accounts.
+          s.success = "If an account exists for that email, a reset link is on its way. Check your inbox (and spam folder).";
+          s.busy = false;
+          render();
+        }catch(e){
+          console.error('TUTOR PASSWORD RESET ERROR:', e);
+          s.busy = false;
+          s.error = 'Something went wrong sending the reset email. Please try again.';
+          render();
+        }
+      };
+      $('#tutorForgotSubmit').onclick = submit;
+      $('#tutorForgotEmailInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#tutorForgotEmailInput').oninput = e => { tutorForgotPasswordState.email = e.target.value; };
+      $('#tutorForgotEmailInput').focus();
+      const backToLoginLink = $('#gateSwitchToTutorLoginFromForgot');
+      if(backToLoginLink) backToLoginLink.onclick = () => { gateMode='tutorLogin'; render(); };
     } else if(gateMode==='tutorSignup'){
       const submit = async () => {
         const d = tutorSignupDraft;
@@ -4700,6 +4761,7 @@ function attachHandlers(){
         const tutorId = $('#tutorSignupTutorIdInput').value.trim();
         const email = $('#tutorSignupEmailInput').value.trim();
         const password = $('#tutorSignupPasswordInput').value;
+        const passwordConfirm = $('#tutorSignupPasswordConfirmInput').value;
         d.code = code; d.fullName = fullName; d.tutorName = tutorName; d.tutorId = tutorId; d.email = email;
 
         if(code !== config.existingTutorCode){
@@ -4722,6 +4784,9 @@ function attachHandlers(){
         }
         if(!password || password.length < 6){
           d.error = 'Password must be at least 6 characters.'; render(); return;
+        }
+        if(password !== passwordConfirm){
+          d.error = 'Passwords do not match.'; render(); return;
         }
         await loadBookings();
         const emailNorm = email.toLowerCase();
@@ -4768,6 +4833,7 @@ function attachHandlers(){
       };
       $('#tutorSignupSubmit').onclick = submit;
       $('#tutorSignupPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+      $('#tutorSignupPasswordConfirmInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
       $('#tutorSignupCodeInput').oninput = e => { tutorSignupDraft.code = e.target.value; };
       $('#tutorSignupNameInput').oninput = e => { tutorSignupDraft.fullName = e.target.value; };
       $('#tutorSignupTutorNameInput').oninput = e => { tutorSignupDraft.tutorName = e.target.value; };
