@@ -3587,6 +3587,13 @@ function getReapplicationHistory(email, excludeAppId){
     if(b.tutorEmploymentStatus === 'terminated'){
       events.push({ type: 'Tutor — Terminated', date: b.tutorEmploymentDate, note: b.tutorEmploymentNote });
     }
+    // Someone who came in via Tutor Sign-Up or "Add Existing Tutor" (skipping
+    // the apply/demo pipeline entirely) never has a demo result to flag —
+    // but if they then submit a normal application too, admin should still
+    // see that this email already has a tutor account.
+    if(b.existingTutor && b.tutorAccountCreated && !isFormerTutor(b)){
+      events.push({ type: 'Existing Tutor — Account Already Active', date: b.submittedAt });
+    }
   });
   return events.sort((x,y) => new Date(y.date||0) - new Date(x.date||0));
 }
