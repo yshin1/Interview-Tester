@@ -1346,9 +1346,23 @@ let appsListenerActive = false;
 // listener below so an auto-refresh never interrupts an in-progress
 // selection or edit — including native <select> dropdowns, which don't
 // have their own "is this open" state we can check directly.
+//
+// Search/filter boxes are deliberately excluded: they restore their typed
+// value and cursor position on every render (see their .focus() +
+// selectionStart/End calls in attachHandlers), so re-rendering around them
+// is safe. Blocking on them just because they're focused — which happens
+// automatically on tab entry and then stays true indefinitely — was
+// silently freezing real-time updates on every list with a search box until
+// the person clicked away from it.
+const SEARCH_INPUT_IDS_SAFE_TO_RERENDER = new Set([
+  'chatsSearchInput', 'tutorChatsSearchInput', 'formerTutorsSearchInput',
+  'archiveAppSearchInput', 'archiveSearchInput'
+]);
 function isFormControlFocused(){
   const el = document.activeElement;
-  return !!el && ['SELECT','INPUT','TEXTAREA'].includes(el.tagName);
+  if(!el) return false;
+  if(SEARCH_INPUT_IDS_SAFE_TO_RERENDER.has(el.id)) return false;
+  return ['SELECT','INPUT','TEXTAREA'].includes(el.tagName);
 }
 
 // All four of these switched from setInterval-based polling (re-reading the
