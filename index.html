@@ -2051,8 +2051,8 @@ function renderGate(){
    Application (job application) screens
    ============================================================ */
 function renderFieldLabelBlock(field){
-  const desc = field.description ? `<div style="font-size:12px; color:var(--slate-light); font-weight:400; margin-top:2px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : '';
-  return `<label style="white-space:pre-wrap; font-size:14.5px; font-weight:600; display:block;">${escapeHtml(field.label)}</label>${desc}`;
+  const desc = field.description ? `<div style="font-size:14px; color:var(--ink); font-weight:400; margin-top:3px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : '';
+  return `<label style="white-space:pre-wrap; font-size:16.5px; font-weight:700; display:block;">${escapeHtml(field.label)}</label>${desc}`;
 }
 // Resizes/compresses an uploaded image file entirely in the browser (canvas),
 // since we store these as base64 in Firestore rather than Firebase Storage.
@@ -2090,7 +2090,7 @@ function renderDynamicField(formKey, field, value, fileName, previewUrl){
   const labelBlock = renderFieldLabelBlock(field);
   switch(field.type){
     case 'section':
-      return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap;">${escapeHtml(field.label)}</div>${field.description ? `<div style="font-size:12px; color:var(--slate-light); margin:-8px 0 10px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : ''}`;
+      return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap; font-size:19px; font-weight:800;">${escapeHtml(field.label)}</div>${field.description ? `<div style="font-size:14px; color:var(--ink); margin:2px 0 10px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : ''}`;
     case 'text':
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
       return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="1" class="auto-grow-textarea" style="resize:vertical; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(value||'')}</textarea></div>`;
