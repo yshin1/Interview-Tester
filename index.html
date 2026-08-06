@@ -1483,6 +1483,30 @@ function renderPreservingChatScroll(){
     }
   }
 }
+// Same idea, but skips the re-render entirely while the chat input is
+// mid-IME-composition (see the comment on chatInputComposing above) —
+// restoring focus/cursor after the fact isn't enough, since rebuilding the
+// DOM node itself resets the browser's in-progress composition buffer.
+function renderPreservingChatScrollUnlessComposing(){
+  if(chatInputComposing){
+    chatInputRerenderPending = true;
+    return;
+  }
+  renderPreservingChatScroll();
+}
+// Wires compositionstart/compositionend tracking onto a chat text input, and
+// flushes any update that arrived (and was deferred) during composition.
+function wireChatComposition(inputEl){
+  if(!inputEl) return;
+  inputEl.addEventListener('compositionstart', () => { chatInputComposing = true; });
+  inputEl.addEventListener('compositionend', () => {
+    chatInputComposing = false;
+    if(chatInputRerenderPending){
+      chatInputRerenderPending = false;
+      renderPreservingChatScroll();
+    }
+  });
+}
 
 
 /* ============================================================
@@ -2417,6 +2441,18 @@ function renderBookDone(){
 }
 
 let chatDraftText = '';
+// Holds a file the person has attached but not yet sent — staged so they
+// can see the filename and remove it before it actually uploads, instead of
+// the old behavior of uploading and sending the instant a file was picked.
+let chatStagedFile = null;
+// True while the browser's IME is mid-composition (e.g. building up a
+// Korean syllable block one jamo at a time). A real-time chat update
+// arriving mid-composition used to trigger a full re-render that replaced
+// the input DOM node, which resets the IME's composition state and left
+// the jamo unmerged (e.g. "니가" showing as "ㄴㅣㄱㅏ"). Deferring the
+// re-render until composition ends avoids interrupting it.
+let chatInputComposing = false;
+let chatInputRerenderPending = false;
 function renderChatPanel(bookingId, viewerRole){
   const b = bookings.find(x => x.id === bookingId);
   const messages = b ? (b.messages||[]) : [];
@@ -2425,6 +2461,11 @@ function renderChatPanel(bookingId, viewerRole){
   <div class="chat-panel">
     <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName)}</div>
     <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
+    ${chatStagedFile ? `
+    <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; margin:0 2px 6px; background:rgba(0,0,0,0.05); border-radius:8px; font-size:12.5px;">
+      <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📎 ${escapeHtml(chatStagedFile.name)}</span>
+      <button type="button" id="chatStagedFileRemoveBtn" class="link-btn" style="color:var(--danger); font-size:12px; padding:0; flex-shrink:0;">Remove</button>
+    </div>` : ''}
     <div class="chat-input-row">
       <button class="btn btn-ghost btn-sm" id="chatAttachBtn" type="button" style="width:auto; padding:10px 12px; display:flex; align-items:center; justify-content:center;" title="Attach a file"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a1.5 1.5 0 01-2.12-2.12l8.49-8.48"></path></svg></button>
       <input type="file" id="chatFileInput" style="display:none;">
@@ -4377,6 +4418,7 @@ function attachHandlers(){
   const logoutBtn = $('#logoutBtn');
   if(logoutBtn) logoutBtn.onclick = async () => {
     stopChatPolling();
+    chatStagedFile = null;
     stopApplicationsPolling();
     stopSignupsPolling();
     stopDevicePolling();
@@ -4989,13 +5031,29 @@ function attachHandlers(){
   if(view==='book' && bk.done){
     const chatInput = $('#chatInput');
     const chatSendBtn = $('#chatSendBtn');
+    const chatAttachStatus = $('#chatAttachStatus');
     const doSend = async () => {
       if(!chatInput) return;
       const text = chatInput.value;
-      if(!text.trim()) return;
+      if(!text.trim() && !chatStagedFile) return;
       chatInput.disabled = true; if(chatSendBtn){ chatSendBtn.disabled = true; chatSendBtn.textContent = 'Sending…'; }
-      await sendApplicantMessage(bk.id, text);
+      let fileInfo = null;
+      if(chatStagedFile){
+        if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
+        try{
+          const url = await uploadEntityFile(chatStagedFile, 'bookings', bk.id, 'chat_'+Date.now());
+          fileInfo = { url, name: chatStagedFile.name, type: chatStagedFile.type };
+        }catch(err){
+          console.error('Chat file upload error:', err);
+          if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
+          chatInput.disabled = false; if(chatSendBtn){ chatSendBtn.disabled = false; chatSendBtn.textContent = 'Send'; }
+          return;
+        }
+      }
+      await sendApplicantMessage(bk.id, text, fileInfo);
+      chatStagedFile = null;
       chatDraftText = '';
+      if(chatAttachStatus) chatAttachStatus.textContent = '';
       chatInput.disabled = false; if(chatSendBtn){ chatSendBtn.disabled = false; chatSendBtn.textContent = 'Send'; }
       render();
       const thread = document.getElementById('chatThread');
@@ -5006,37 +5064,30 @@ function attachHandlers(){
     if(chatSendBtn) chatSendBtn.onclick = doSend;
     if(chatInput){
       chatInput.oninput = e => { chatDraftText = e.target.value; };
-      chatInput.addEventListener('keydown', e => { if(e.key==='Enter') doSend(); });
+      chatInput.addEventListener('keydown', e => { if(e.key==='Enter' && !e.isComposing) doSend(); });
+      wireChatComposition(chatInput);
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
     }
     const chatAttachBtn = $('#chatAttachBtn');
     const chatFileInput = $('#chatFileInput');
-    const chatAttachStatus = $('#chatAttachStatus');
     if(chatAttachBtn && chatFileInput) chatAttachBtn.onclick = () => chatFileInput.click();
-    if(chatFileInput) chatFileInput.onchange = async (e) => {
+    if(chatFileInput) chatFileInput.onchange = (e) => {
       const file = e.target.files[0];
       if(!file) return;
-      if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
-      if(chatAttachBtn) chatAttachBtn.disabled = true;
-      try{
-        const url = await uploadEntityFile(file, 'bookings', bk.id, 'chat_'+Date.now());
-        await sendApplicantMessage(bk.id, '', { url, name: file.name, type: file.type });
-        render();
-        const thread = document.getElementById('chatThread');
-        if(thread) thread.scrollTop = thread.scrollHeight;
-      }catch(err){
-        console.error('Chat file upload error:', err);
-        if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
-      }
+      chatStagedFile = file;
       chatFileInput.value = '';
-      if(chatAttachBtn) chatAttachBtn.disabled = false;
+      render();
+      const freshInput = document.getElementById('chatInput');
+      if(freshInput) freshInput.focus();
     };
+    const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
+    if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
     if(bk.id) startChatPolling(bk.id, async () => {
       if(view==='book' && bk.done){
         const fresh = bookings.find(b => b.id === bk.id);
         if(fresh && unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
-        renderPreservingChatScroll();
+        renderPreservingChatScrollUnlessComposing();
       }
     });
     const doneClose = $('#doneClose');
@@ -6405,16 +6456,32 @@ Langdy Team`;
     if(chatTarget){
       const chatInput = $('#chatInput');
       const chatSendBtn = $('#chatSendBtn');
+      const chatAttachStatus = $('#chatAttachStatus');
       const doSend = async () => {
         if(!chatInput) return;
         const text = chatInput.value;
-        if(!text.trim()) return;
+        if(!text.trim() && !chatStagedFile) return;
         chatInput.disabled = true; if(chatSendBtn) chatSendBtn.disabled = true;
-        await sendChatMessage(chatTarget.id, 'admin', text);
+        let fileInfo = null;
+        if(chatStagedFile){
+          if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
+          try{
+            const url = await uploadEntityFile(chatStagedFile, 'bookings', chatTarget.id, 'chat_'+Date.now());
+            fileInfo = { url, name: chatStagedFile.name, type: chatStagedFile.type };
+          }catch(err){
+            console.error('Chat file upload error:', err);
+            if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
+            chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
+            return;
+          }
+        }
+        await sendChatMessage(chatTarget.id, 'admin', text, fileInfo);
         // Don't manually touch chatTarget/bookings here — the real-time
         // listener already watching this booking reflects the send moments
         // after it lands, via its own onTick callback below.
+        chatStagedFile = null;
         chatDraftText = '';
+        if(chatAttachStatus) chatAttachStatus.textContent = '';
         chatInput.disabled = false; if(chatSendBtn) chatSendBtn.disabled = false;
         render();
         const thread = document.getElementById('chatThread');
@@ -6425,32 +6492,25 @@ Langdy Team`;
       if(chatSendBtn) chatSendBtn.onclick = doSend;
       if(chatInput){
         chatInput.oninput = e => { chatDraftText = e.target.value; };
-        chatInput.addEventListener('keydown', e => { if(e.key==='Enter') doSend(); });
+        chatInput.addEventListener('keydown', e => { if(e.key==='Enter' && !e.isComposing) doSend(); });
+        wireChatComposition(chatInput);
       }
       const thread = document.getElementById('chatThread');
       if(thread) thread.scrollTop = thread.scrollHeight;
       const chatAttachBtn = $('#chatAttachBtn');
       const chatFileInput = $('#chatFileInput');
-      const chatAttachStatus = $('#chatAttachStatus');
       if(chatAttachBtn && chatFileInput) chatAttachBtn.onclick = () => chatFileInput.click();
-      if(chatFileInput) chatFileInput.onchange = async (e) => {
+      if(chatFileInput) chatFileInput.onchange = (e) => {
         const file = e.target.files[0];
         if(!file) return;
-        if(chatAttachStatus) chatAttachStatus.textContent = 'Uploading file…';
-        if(chatAttachBtn) chatAttachBtn.disabled = true;
-        try{
-          const url = await uploadEntityFile(file, 'bookings', chatTarget.id, 'chat_'+Date.now());
-          await sendChatMessage(chatTarget.id, 'admin', '', { url, name: file.name, type: file.type });
-          render();
-          const freshThread = document.getElementById('chatThread');
-          if(freshThread) freshThread.scrollTop = freshThread.scrollHeight;
-        }catch(err){
-          console.error('Chat file upload error:', err);
-          if(chatAttachStatus) chatAttachStatus.textContent = "Couldn't upload that file — please try again.";
-        }
+        chatStagedFile = file;
         chatFileInput.value = '';
-        if(chatAttachBtn) chatAttachBtn.disabled = false;
+        render();
+        const freshInput = document.getElementById('chatInput');
+        if(freshInput) freshInput.focus();
       };
+      const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
+      if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
       $$('[data-delete-msg]').forEach(el=>{
         el.onclick = async () => {
           const bookingId = el.dataset.deleteMsg;
@@ -6469,14 +6529,14 @@ Langdy Team`;
           render();
         };
       });
-      $('#chatModalCloseBtn').onclick = () => { stopChatPolling(); chatDraftText=''; chatTarget=null; render(); };
-      $('#chatModalOverlay').onclick = (e) => { if(e.target.id==='chatModalOverlay'){ stopChatPolling(); chatDraftText=''; chatTarget=null; render(); } };
+      $('#chatModalCloseBtn').onclick = () => { stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; render(); };
+      $('#chatModalOverlay').onclick = (e) => { if(e.target.id==='chatModalOverlay'){ stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; render(); } };
       startChatPolling(chatTarget.id, async () => {
         if(chatTarget){
           const fresh = bookings.find(b=>b.id===chatTarget.id);
           if(fresh) chatTarget = fresh;
           if(unreadCountForAdmin(chatTarget) > 0) await markChatReadByAdmin(chatTarget.id);
-          renderPreservingChatScroll();
+          renderPreservingChatScrollUnlessComposing();
         }
       });
     } else {
