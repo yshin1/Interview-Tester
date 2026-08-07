@@ -1441,7 +1441,28 @@ function startBookingsPolling(){
   if(bookingsListenerActive) return;
   bookingsListenerActive = true;
   bookingsUnsubscribe = db.collection(BOOKINGS_COLLECTION).onSnapshot(snap => {
-    bookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+    const newBookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+    if(view==='admin'){
+      // Detect newly-arrived applicant/tutor messages across EVERY booking
+      // (not just whichever chat is currently open) so admin gets notified
+      // even while browsing a list instead of a specific conversation.
+      newBookings.forEach(nb => {
+        const newMsgs = nb.messages || [];
+        const prevCount = chatKnownMessageCounts[nb.id];
+        // Skip the very first snapshot for a booking — otherwise every
+        // pre-existing message would fire a notification the moment the
+        // listener starts, instead of only genuinely new ones.
+        if(prevCount !== undefined && newMsgs.length > prevCount){
+          newMsgs.slice(prevCount).forEach(m => {
+            if(m.from === 'applicant'){
+              maybeShowChatNotification(nb.adminChatLabel || nb.fullName, m.text, nb.id, chatTarget ? chatTarget.id : null);
+            }
+          });
+        }
+        chatKnownMessageCounts[nb.id] = newMsgs.length;
+      });
+    }
+    bookings = newBookings;
     if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
       render();
     }
@@ -2453,12 +2474,60 @@ let chatStagedFile = null;
 // re-render until composition ends avoids interrupting it.
 let chatInputComposing = false;
 let chatInputRerenderPending = false;
+
+// Browser notifications for new chat messages only — no server push, no
+// Cloud Functions, just the standard Notification API. Works as long as a
+// tab with this site is open somewhere (even unfocused or in the
+// background); does NOT fire if the site/browser is fully closed.
+let chatNotificationPermission = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
+// Tracks the last-seen message count per booking, so an incoming real-time
+// update can tell "N new messages just got added" apart from any other
+// change to the document — used purely to decide when to fire a
+// notification.
+let chatKnownMessageCounts = {};
+async function requestChatNotificationPermission(){
+  if(typeof Notification === 'undefined') return;
+  try{
+    chatNotificationPermission = await Notification.requestPermission();
+  }catch(e){
+    console.error('Notification permission request failed:', e);
+  }
+  render();
+}
+// Shows a browser notification for an incoming chat message, unless the
+// person is already actively looking at that exact chat with the tab
+// focused (in which case they'll see it appear live anyway).
+function maybeShowChatNotification(senderName, messageText, bookingId, currentlyOpenBookingId){
+  if(typeof Notification === 'undefined' || chatNotificationPermission !== 'granted') return;
+  const alreadyLookingAtIt = document.visibilityState === 'visible' && currentlyOpenBookingId === bookingId;
+  if(alreadyLookingAtIt) return;
+  try{
+    const notif = new Notification(senderName, { body: messageText || '📎 Sent a file', tag: 'chat-'+bookingId });
+    notif.onclick = () => { window.focus(); notif.close(); };
+  }catch(e){
+    console.error('Failed to show notification:', e);
+  }
+}
+// Renders the small bell toggle used to request/show notification status —
+// shared by both the admin and applicant/tutor chat panels.
+function renderChatNotificationToggle(){
+  if(typeof Notification === 'undefined') return '';
+  if(chatNotificationPermission === 'granted'){
+    return `<span style="font-size:11px; color:var(--slate-light); display:flex; align-items:center; gap:4px;">🔔 Notifications on</span>`;
+  }
+  if(chatNotificationPermission === 'denied'){
+    return `<span style="font-size:11px; color:var(--slate-light);">🔕 Notifications blocked (check browser settings)</span>`;
+  }
+  return `<button type="button" id="chatEnableNotifsBtn" class="link-btn" style="font-size:11.5px; padding:0;">🔔 Turn on message notifications</button>`;
+}
+
 function renderChatPanel(bookingId, viewerRole){
   const b = bookings.find(x => x.id === bookingId);
   const messages = b ? (b.messages||[]) : [];
   const theirName = b ? (b.adminChatLabel || b.fullName) : null;
   return `
   <div class="chat-panel">
+    <div style="display:flex; justify-content:flex-end; padding:4px 4px 0;">${renderChatNotificationToggle()}</div>
     <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName)}</div>
     <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
     ${chatStagedFile ? `
@@ -3701,7 +3770,7 @@ function renderAdminTutorChats(){
 
   return `
   <div class="card">
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
       <input type="text" id="tutorChatsSearchInput" placeholder="Search by name…" value="${escapeHtml(tutorChatsSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
       <label class="checkbox-item" style="cursor:pointer; white-space:nowrap;">
         <input type="checkbox" id="tutorChatsUnreadOnlyToggle" ${tutorChatsFilterUnreadOnly?'checked':''}>
@@ -3709,11 +3778,13 @@ function renderAdminTutorChats(){
       </label>
       <button class="btn btn-gold btn-sm" id="openAddExistingTutorBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">+ Add Existing Tutor</button>
     </div>
+    <div style="margin-bottom:14px;">${renderChatNotificationToggle()}</div>
     <div class="section-desc" style="margin-bottom:14px;">Already-hired tutors who never went through this site's apply/demo pipeline can be added directly here — this creates their record and sends the same account invite as everyone else.</div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
+
   </div>`;
 }
 
@@ -5083,10 +5154,22 @@ function attachHandlers(){
     };
     const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
     if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
+    const chatEnableNotifsBtn = $('#chatEnableNotifsBtn');
+    if(chatEnableNotifsBtn) chatEnableNotifsBtn.onclick = requestChatNotificationPermission;
     if(bk.id) startChatPolling(bk.id, async () => {
       if(view==='book' && bk.done){
         const fresh = bookings.find(b => b.id === bk.id);
-        if(fresh && unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
+        if(fresh){
+          const newMsgs = fresh.messages || [];
+          const prevCount = chatKnownMessageCounts[bk.id] || 0;
+          if(newMsgs.length > prevCount){
+            newMsgs.slice(prevCount).forEach(m => {
+              if(m.from === 'admin') maybeShowChatNotification('Admin', m.text, bk.id, bk.id);
+            });
+          }
+          chatKnownMessageCounts[bk.id] = newMsgs.length;
+          if(unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
+        }
         renderPreservingChatScrollUnlessComposing();
       }
     });
@@ -5551,6 +5634,8 @@ Langdy Team`;
         addExistingTutorModalOpen = true;
         render();
       };
+      const listNotifsBtn = $('#chatEnableNotifsBtn');
+      if(listNotifsBtn) listNotifsBtn.onclick = requestChatNotificationPermission;
       $$('[data-edit-chat-label]').forEach(el=>{
         el.onclick = () => {
           const id = el.dataset.editChatLabel;
@@ -6511,6 +6596,8 @@ Langdy Team`;
       };
       const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
       if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
+      const chatEnableNotifsBtn = $('#chatEnableNotifsBtn');
+      if(chatEnableNotifsBtn) chatEnableNotifsBtn.onclick = requestChatNotificationPermission;
       $$('[data-delete-msg]').forEach(el=>{
         el.onclick = async () => {
           const bookingId = el.dataset.deleteMsg;
