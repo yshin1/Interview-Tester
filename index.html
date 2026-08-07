@@ -2420,6 +2420,7 @@ function renderBookDone(){
       <h3 style="font-size:16px; font-weight:800; margin:26px 0 4px;">One last step: confirm your booking</h3>
       <p style="font-size:13px; color:var(--slate); margin:0 0 12px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>`}
 
+      ${renderChatNotificationBanner()}
       ${renderChatPanel(bk.id, 'applicant')}
 
       ${isTutorSession ? `
@@ -2480,6 +2481,11 @@ let chatInputRerenderPending = false;
 // tab with this site is open somewhere (even unfocused or in the
 // background); does NOT fire if the site/browser is fully closed.
 let chatNotificationPermission = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
+// Browser permission can only ever be granted or revoked by the person
+// through their browser's own settings — a site can never programmatically
+// turn it back off. So "Turn Off" here just mutes our own use of it, kept
+// separate from the underlying (one-way) browser permission.
+let chatNotificationsEnabled = true;
 // Tracks the last-seen message count per booking, so an incoming real-time
 // update can tell "N new messages just got added" apart from any other
 // change to the document — used purely to decide when to fire a
@@ -2498,7 +2504,7 @@ async function requestChatNotificationPermission(){
 // person is already actively looking at that exact chat with the tab
 // focused (in which case they'll see it appear live anyway).
 function maybeShowChatNotification(senderName, messageText, bookingId, currentlyOpenBookingId){
-  if(typeof Notification === 'undefined' || chatNotificationPermission !== 'granted') return;
+  if(typeof Notification === 'undefined' || chatNotificationPermission !== 'granted' || !chatNotificationsEnabled) return;
   const alreadyLookingAtIt = document.visibilityState === 'visible' && currentlyOpenBookingId === bookingId;
   if(alreadyLookingAtIt) return;
   try{
@@ -2513,12 +2519,57 @@ function maybeShowChatNotification(senderName, messageText, bookingId, currently
 function renderChatNotificationToggle(){
   if(typeof Notification === 'undefined') return '';
   if(chatNotificationPermission === 'granted'){
-    return `<span style="font-size:11px; color:var(--slate-light); display:flex; align-items:center; gap:4px;">🔔 Notifications on</span>`;
+    return chatNotificationsEnabled
+      ? `<button type="button" id="chatMuteNotifsBtn" class="link-btn" style="font-size:11px; color:var(--slate-light); padding:0;">🔔 Notifications on — tap to mute</button>`
+      : `<button type="button" id="chatUnmuteNotifsBtn" class="link-btn" style="font-size:11px; color:var(--slate-light); padding:0;">🔕 Muted — tap to turn on</button>`;
   }
   if(chatNotificationPermission === 'denied'){
     return `<span style="font-size:11px; color:var(--slate-light);">🔕 Notifications blocked (check browser settings)</span>`;
   }
   return `<button type="button" id="chatEnableNotifsBtn" class="link-btn" style="font-size:11.5px; padding:0;">🔔 Turn on message notifications</button>`;
+}
+// A bigger, harder-to-miss version of the same control — a full-width bar
+// with a proper ON/OFF switch, meant to sit at the top of the Chat tab
+// itself (and the tutor/applicant's own chat view) rather than tucked into
+// a corner of an individual conversation.
+function renderChatNotificationBanner(){
+  if(typeof Notification === 'undefined') return '';
+  const denied = chatNotificationPermission === 'denied';
+  const on = chatNotificationPermission === 'granted' && chatNotificationsEnabled;
+  return `
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; margin-bottom:14px; border-radius:10px; background:${on?'rgba(46,160,67,0.08)':'var(--paper-2)'}; border:1.5px solid ${on?'rgba(46,160,67,0.35)':'var(--line)'};">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span style="font-size:20px;">${on?'🔔':'🔕'}</span>
+      <div>
+        <div style="font-size:13.5px; font-weight:700;">${on?'Message notifications are on':denied?'Notifications are blocked':'Get notified about new messages'}</div>
+        <div style="font-size:11.5px; color:var(--slate-light); margin-top:1px;">${denied?'Enable notifications for this site in your browser settings to turn them back on.':'Works as long as this tab is open somewhere, even in the background.'}</div>
+      </div>
+    </div>
+    ${denied ? '' : `
+    <button type="button" id="chatNotifBannerToggle" class="btn ${on?'btn-ghost':'btn-gold'} btn-sm" style="width:auto; padding:9px 18px; white-space:nowrap;">${on?'Turn Off':'Turn On'}</button>`}
+  </div>`;
+}
+// Shared click handler for both the small toggle and the big banner button —
+// requests permission the first time, and just flips the mute flag on
+// every subsequent click since permission itself can't be re-requested or
+// revoked programmatically once granted.
+async function toggleChatNotifications(){
+  if(chatNotificationPermission !== 'granted'){
+    await requestChatNotificationPermission();
+    chatNotificationsEnabled = true;
+  } else {
+    chatNotificationsEnabled = !chatNotificationsEnabled;
+    render();
+  }
+}
+// Binds every possible notification control (the big banner button and the
+// small inline toggle, in whichever state each currently renders) to the
+// same handler — call this once per render wherever either might appear.
+function wireChatNotificationControls(){
+  ['chatEnableNotifsBtn','chatMuteNotifsBtn','chatUnmuteNotifsBtn','chatNotifBannerToggle'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.onclick = toggleChatNotifications;
+  });
 }
 
 function renderChatPanel(bookingId, viewerRole){
@@ -2527,7 +2578,6 @@ function renderChatPanel(bookingId, viewerRole){
   const theirName = b ? (b.adminChatLabel || b.fullName) : null;
   return `
   <div class="chat-panel">
-    <div style="display:flex; justify-content:flex-end; padding:4px 4px 0;">${renderChatNotificationToggle()}</div>
     <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName)}</div>
     <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
     ${chatStagedFile ? `
@@ -2653,6 +2703,7 @@ function renderAdmin(){
   <div class="admin-wrap">
     <div class="admin-tabs">${primaryTabsHtml}</div>
     ${subTabsHtml}
+    ${currentGroup.label === 'Chat' ? renderChatNotificationBanner() : ''}
     ${body}
     ${editingBooking ? renderEditModal() : ''}
     ${cancelTarget ? renderCancelModal() : ''}
@@ -3778,7 +3829,6 @@ function renderAdminTutorChats(){
       </label>
       <button class="btn btn-gold btn-sm" id="openAddExistingTutorBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">+ Add Existing Tutor</button>
     </div>
-    <div style="margin-bottom:14px;">${renderChatNotificationToggle()}</div>
     <div class="section-desc" style="margin-bottom:14px;">Already-hired tutors who never went through this site's apply/demo pipeline can be added directly here — this creates their record and sends the same account invite as everyone else.</div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
@@ -4485,6 +4535,10 @@ function renderAdminChatModal(){
 function attachHandlers(){
   const $ = sel => document.querySelector(sel);
   const $$ = sel => document.querySelectorAll(sel);
+  // Wired once here regardless of view — harmless no-op wherever none of
+  // these buttons happen to be in the DOM (the banner can show at the top
+  // of the admin Chat tab group, or the tutor/applicant's own chat view).
+  wireChatNotificationControls();
 
   const logoutBtn = $('#logoutBtn');
   if(logoutBtn) logoutBtn.onclick = async () => {
@@ -5154,8 +5208,6 @@ function attachHandlers(){
     };
     const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
     if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
-    const chatEnableNotifsBtn = $('#chatEnableNotifsBtn');
-    if(chatEnableNotifsBtn) chatEnableNotifsBtn.onclick = requestChatNotificationPermission;
     if(bk.id) startChatPolling(bk.id, async () => {
       if(view==='book' && bk.done){
         const fresh = bookings.find(b => b.id === bk.id);
@@ -5634,8 +5686,6 @@ Langdy Team`;
         addExistingTutorModalOpen = true;
         render();
       };
-      const listNotifsBtn = $('#chatEnableNotifsBtn');
-      if(listNotifsBtn) listNotifsBtn.onclick = requestChatNotificationPermission;
       $$('[data-edit-chat-label]').forEach(el=>{
         el.onclick = () => {
           const id = el.dataset.editChatLabel;
@@ -6596,8 +6646,6 @@ Langdy Team`;
       };
       const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
       if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
-      const chatEnableNotifsBtn = $('#chatEnableNotifsBtn');
-      if(chatEnableNotifsBtn) chatEnableNotifsBtn.onclick = requestChatNotificationPermission;
       $$('[data-delete-msg]').forEach(el=>{
         el.onclick = async () => {
           const bookingId = el.dataset.deleteMsg;
