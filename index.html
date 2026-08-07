@@ -1594,6 +1594,39 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function isValidEmail(v){ return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test((v||'').trim()); }
+// Small "NEW" badge for anything the admin hasn't opened/looked at yet —
+// applications, account signups, device submissions, and fresh bookings.
+// Only ever true for records explicitly created with viewedByAdmin:false;
+// pre-existing records from before this feature don't have the field at
+// all (undefined), so they correctly never show as "new".
+function renderNewBadge(record){
+  if(!record || record.viewedByAdmin !== false) return '';
+  return `<span class="unread-badge" style="background:var(--danger); margin-left:6px; letter-spacing:0.3px;">NEW</span>`;
+}
+async function markApplicationViewed(id){
+  const a = applications.find(x => x.id === id);
+  if(!a || a.viewedByAdmin === true) return;
+  await adminDb.collection(APPLICATIONS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  a.viewedByAdmin = true;
+}
+async function markAccountSignupViewed(id){
+  const s = accountSignups.find(x => x.id === id);
+  if(!s || s.viewedByAdmin === true) return;
+  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  s.viewedByAdmin = true;
+}
+async function markDeviceSubmissionViewed(id){
+  const d = deviceSubmissions.find(x => x.id === id);
+  if(!d || d.viewedByAdmin === true) return;
+  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  d.viewedByAdmin = true;
+}
+async function markBookingViewed(id){
+  const b = bookings.find(x => x.id === id);
+  if(!b || b.viewedByAdmin === true) return;
+  await db.collection(BOOKINGS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  b.viewedByAdmin = true;
+}
 // Keeps a text field small (one line) by default, only growing taller once
 // the person actually types a line break or enough text to wrap — instead of
 // every text field reserving 3 rows of empty space up front.
@@ -2659,19 +2692,37 @@ function unreadCountForTabKey(key){
   }
   return 0;
 }
+// Counts records not yet opened by admin, per tab — same idea as the
+// unread-message counts above, but for "NEW" applications/bookings/signups/
+// device submissions rather than chat messages.
+function newCountForTabKey(key){
+  const isNew = r => r.viewedByAdmin === false;
+  if(key === 'applications') return applications.filter(a => !isArchivedApplication(a) && isNew(a)).length;
+  if(key === 'list') return bookings.filter(b => b.demoResult !== 'pass' && isNew(b)).length;
+  if(key === 'secondDemo') return bookings.filter(b => b.demoResult === 'pass' && isNew(b)).length;
+  if(key === 'accountSignups') return accountSignups.filter(isNew).length;
+  if(key === 'deviceSubmissions') return deviceSubmissions.filter(isNew).length;
+  return 0;
+}
 
 function renderAdmin(){
   const currentGroup = findTabGroup(adminTab);
   const primaryTabsHtml = TAB_GROUPS.map(g => {
     const isActive = g === currentGroup;
     const clickTarget = g.tab || g.children[0][0]; // groups with children default to their first sub-tab
-    return `<div class="admin-tab ${isActive?'active':''}" data-group-tab="${clickTarget}">${g.label}</div>`;
+    const keys = g.children ? g.children.map(([k]) => k) : [g.tab];
+    const newCount = keys.reduce((sum, k) => sum + newCountForTabKey(k), 0);
+    return `<div class="admin-tab ${isActive?'active':''}" data-group-tab="${clickTarget}">${g.label}${newCount>0?`<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>`:''}</div>`;
   }).join('');
   const subTabsHtml = currentGroup.children ? `
     <div class="admin-subtabs">
       ${currentGroup.children.map(([k,label]) => {
         const unread = unreadCountForTabKey(k);
-        return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${unread>0?`<span class="unread-badge" style="margin-left:6px;">${unread}</span>`:''}</div>`;
+        const newCount = newCountForTabKey(k);
+        const badge = unread>0
+          ? `<span class="unread-badge" style="margin-left:6px;">${unread}</span>`
+          : newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
+        return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${badge}</div>`;
       }).join('')}
     </div>` : '';
 
@@ -2900,7 +2951,7 @@ function renderAdminApplications(){
   const rows = sorted.length===0 ? `<tr><td colspan="8" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => `
     <tr>
       <td><input type="checkbox" data-select-app="${a.id}" ${selectedApplicationIds.has(a.id)?'checked':''} style="width:16px; height:16px; accent-color:var(--navy);"></td>
-      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span><br><span style="color:var(--slate-light); font-size:10.5px;">Worked before: ${escapeHtml(a.workedBefore||'—')}</span></td>
+      <td><strong>${escapeHtml(a.fullName)}</strong>${renderNewBadge(a)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span><br><span style="color:var(--slate-light); font-size:10.5px;">Worked before: ${escapeHtml(a.workedBefore||'—')}</span></td>
       <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
       <td class="tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
       <td>
@@ -3140,7 +3191,7 @@ function renderAdminAccountSignups(){
   }
   const rows = sorted.map(s => `
     <tr>
-      <td><strong>${escapeHtml(s.tutorName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(s.email)}</span></td>
+      <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(s.email)}</span></td>
       <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
       <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
       <td>
@@ -3250,7 +3301,7 @@ function renderAdminDeviceSubmissions(){
   const sorted = [...deviceSubmissions].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   const rows = sorted.map(s => `
     <tr>
-      <td><strong>${escapeHtml(s.tutorName)}</strong></td>
+      <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}</td>
       <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
       <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
       <td>
@@ -3365,7 +3416,7 @@ function renderAdminList(){
     const unread = unreadCountForAdmin(b);
     return `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td class="tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
       <td class="tag">${fmtDateLabel(b.date)}</td>
       <td class="tag">${b.time}</td>
@@ -4000,7 +4051,7 @@ function renderAdminSecondDemo(){
   });
   const rows = sorted.map(b => `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
       <td>
         <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
@@ -4170,7 +4221,7 @@ function renderAdminOnboarding(){
 
   const rows = sorted.length===0 ? `<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--slate-light);">No one matches this filter.</td></tr>` : sorted.map(b => `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
       <td>
         <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
@@ -4609,7 +4660,7 @@ function attachHandlers(){
       try{
         const emailNorm = (state.answers[emailField.id]||'').trim().toLowerCase();
         const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-        const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false };
+        const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false, viewedByAdmin: false };
 
         // File uploads and the duplicate-email check used to run one after
         // another — each file waiting for the previous one, and all of that
@@ -4702,7 +4753,7 @@ function attachHandlers(){
       state.busy = true; render();
       try{
         const signupId = 'signup_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-        const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false };
+        const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false, viewedByAdmin: false };
         const uploadTasks = [];
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image' || field.type === 'notice') continue;
@@ -4767,7 +4818,7 @@ function attachHandlers(){
       state.busy = true; render();
       try{
         const deviceId = 'device_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-        const record = { id: deviceId, submittedAt: new Date().toISOString(), reviewed: false };
+        const record = { id: deviceId, submittedAt: new Date().toISOString(), reviewed: false, viewedByAdmin: false };
         const uploadTasks = [];
         for(const field of schema){
           if(field.type === 'section' || field.type === 'image') continue;
@@ -5105,6 +5156,7 @@ function attachHandlers(){
               messages: [{ from:'system', text:'Please start by sending your Full Name!', at: new Date().toISOString() }],
               guidelineSent: false,
               lastReadByAdmin: null,
+              viewedByAdmin: false,
               assignedTo: defaultAssigneeFor(bk.date, bk.time),
               onboardingStatus: '',
               onboardingDate: '',
@@ -5395,7 +5447,7 @@ Langdy Team`;
       });
 
       $$('[data-view-app]').forEach(el=>{
-        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; markApplicationViewed(applicationDetailTarget); render(); };
       });
 
       $$('[data-reapp-history]').forEach(el=>{
@@ -5465,7 +5517,7 @@ Langdy Team`;
         };
       });
       $$('[data-view-signup]').forEach(el=>{
-        el.onclick = () => { accountSignupDetailTarget = el.dataset.viewSignup; render(); };
+        el.onclick = () => { accountSignupDetailTarget = el.dataset.viewSignup; markAccountSignupViewed(accountSignupDetailTarget); render(); };
       });
       $$('[data-delete-signup]').forEach(el=>{
         el.onclick = () => { deleteAccountSignupTarget = el.dataset.deleteSignup; render(); };
@@ -5503,7 +5555,7 @@ Langdy Team`;
         exportSubmissionsToExcel(deviceSubmissions, formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA, 'Langdy_DeviceSubmissions');
       };
       $$('[data-view-device]').forEach(el=>{
-        el.onclick = () => { deviceSubmissionDetailTarget = el.dataset.viewDevice; render(); };
+        el.onclick = () => { deviceSubmissionDetailTarget = el.dataset.viewDevice; markDeviceSubmissionViewed(deviceSubmissionDetailTarget); render(); };
       });
       $$('[data-delete-device]').forEach(el=>{
         el.onclick = () => { deleteDeviceSubmissionTarget = el.dataset.deleteDevice; render(); };
@@ -5544,6 +5596,7 @@ Langdy Team`;
           editingBooking = bookings.find(b=>b.id===id);
           editDate = editingBooking.date; editTime = editingBooking.time; editError='';
           dayDetailTarget = null;
+          markBookingViewed(id);
           render();
         };
       });
@@ -5593,6 +5646,7 @@ Langdy Team`;
           const id = el.dataset.editId;
           editingBooking = bookings.find(b=>b.id===id);
           editDate = editingBooking.date; editTime = editingBooking.time; editError='';
+          markBookingViewed(id);
           render();
         };
       });
@@ -6542,7 +6596,7 @@ Langdy Team`;
         searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
       }
       $$('[data-view-app]').forEach(el=>{
-        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; markApplicationViewed(applicationDetailTarget); render(); };
       });
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
@@ -6574,7 +6628,7 @@ Langdy Team`;
         searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
       }
       $$('[data-view-app]').forEach(el=>{
-        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; render(); };
+        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; markApplicationViewed(applicationDetailTarget); render(); };
       });
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
