@@ -1228,6 +1228,12 @@ async function markChatReadByAdmin(bookingId){
   await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByAdmin: now });
   const idx = bookings.findIndex(b => b.id === bookingId);
   if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByAdmin: now });
+  // Checking a booking's chat for the first time is a clear, natural signal
+  // that admin has looked at it — covers cases like marking a 2nd demo
+  // result straight from the quick dropdown in the list, which (unlike
+  // clicking "Change") never otherwise touched viewedByAdmin, leaving a
+  // stale "NEW" badge behind even after the booking moved on to onboarding.
+  markBookingViewed(bookingId);
 }
 // Mirror of the above, but tracking whether the APPLICANT/TUTOR has seen the
 // ADMIN's messages — powers the "Seen" read-receipt shown under the
@@ -2699,7 +2705,11 @@ function newCountForTabKey(key){
   const isNew = r => r.viewedByAdmin === false;
   if(key === 'applications') return applications.filter(a => !isArchivedApplication(a) && isNew(a)).length;
   if(key === 'list') return bookings.filter(b => b.demoResult !== 'pass' && isNew(b)).length;
-  if(key === 'secondDemo') return bookings.filter(b => b.demoResult === 'pass' && isNew(b)).length;
+  // Excludes bookings that already have a 2nd demo result — once a decision
+  // is made they've effectively moved on to onboarding, so they shouldn't
+  // keep counting as "new" here even in the rare case viewedByAdmin never
+  // got set (e.g. admin only ever used the quick result dropdown).
+  if(key === 'secondDemo') return bookings.filter(b => b.demoResult === 'pass' && !b.secondDemoResult && isNew(b)).length;
   if(key === 'accountSignups') return accountSignups.filter(isNew).length;
   if(key === 'deviceSubmissions') return deviceSubmissions.filter(isNew).length;
   return 0;
@@ -4051,7 +4061,7 @@ function renderAdminSecondDemo(){
   });
   const rows = sorted.map(b => `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(b.fullName)}</strong>${b.secondDemoResult ? '' : renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
       <td>
         <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
