@@ -309,7 +309,7 @@
   .form-question{ background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:20px; }
   .form-section-banner{ background:var(--navy); color:#fff; padding:14px 22px; border-radius:12px; font-size:17px; font-weight:800; margin:32px 0 16px; white-space:pre-wrap; }
   .form-section-banner:first-child{ margin-top:0; }
-  .form-section-desc{ font-size:13.5px; color:var(--ink); margin:-8px 0 18px; padding:0 4px; white-space:pre-wrap; }
+  .form-section-desc{ font-size:13.5px; color:var(--ink); line-height:1.55; margin:10px 0 22px; padding:0 4px; white-space:pre-wrap; }
   textarea{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; resize:vertical; min-height:90px; }
   select{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; }
   .checkbox-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
@@ -2118,8 +2118,8 @@ function renderGate(){
    Application (job application) screens
    ============================================================ */
 function renderFieldLabelBlock(field){
-  const desc = field.description ? `<div style="font-size:14px; color:var(--ink); font-weight:400; margin-top:3px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : '';
-  return `<label style="white-space:pre-wrap; font-size:16.5px; font-weight:700; display:block;">${escapeHtml(field.label)}</label>${desc}`;
+  const desc = field.description ? `<div style="font-size:14px; color:var(--ink); font-weight:400; margin-top:8px; line-height:1.55; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : '';
+  return `<div style="margin-bottom:16px;"><label style="white-space:pre-wrap; font-size:16.5px; font-weight:700; display:block; margin-bottom:0;">${escapeHtml(field.label)}</label>${desc}</div>`;
 }
 // Resizes/compresses an uploaded image file entirely in the browser (canvas),
 // since we store these as base64 in Firestore rather than Firebase Storage.
