@@ -303,6 +303,13 @@
   .apply-section{ margin-bottom:28px; }
   .apply-section-title{ font-size:15px; font-weight:800; margin:0 0 4px; padding-bottom:8px; border-bottom:2px solid var(--line); }
   .apply-section-desc{ font-size:12.5px; color:var(--slate); margin:6px 0 16px; }
+  /* Each question sits in its own clearly-bounded block — modeled on Google
+     Forms, where every question is visually separate rather than a long
+     unbroken list of labels and inputs. */
+  .form-question{ background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:20px; }
+  .form-section-banner{ background:var(--navy); color:#fff; padding:14px 22px; border-radius:12px; font-size:17px; font-weight:800; margin:32px 0 16px; white-space:pre-wrap; }
+  .form-section-banner:first-child{ margin-top:0; }
+  .form-section-desc{ font-size:13.5px; color:var(--ink); margin:-8px 0 18px; padding:0 4px; white-space:pre-wrap; }
   textarea{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; resize:vertical; min-height:90px; }
   select{ width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:14.5px; font-family:inherit; color:var(--ink); background:#fff; }
   .checkbox-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; }
@@ -1469,7 +1476,7 @@ function startBookingsPolling(){
       });
     }
     bookings = newBookings;
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='tutorList' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
       render();
     }
   }, err => console.error('Bookings listener error:', err));
@@ -2150,21 +2157,21 @@ function renderDynamicField(formKey, field, value, fileName, previewUrl){
   const labelBlock = renderFieldLabelBlock(field);
   switch(field.type){
     case 'section':
-      return `<div class="apply-section-title" style="margin-top:18px; white-space:pre-wrap; font-size:19px; font-weight:800;">${escapeHtml(field.label)}</div>${field.description ? `<div style="font-size:14px; color:var(--ink); margin:2px 0 10px; white-space:pre-wrap;">${escapeHtml(field.description)}</div>` : ''}`;
+      return `<div class="form-section-banner">${escapeHtml(field.label)}</div>${field.description ? `<div class="form-section-desc">${escapeHtml(field.description)}</div>` : ''}`;
     case 'text':
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
-      return `<div class="field">${labelBlock}<textarea id="${idAttr}" rows="1" class="auto-grow-textarea" style="resize:vertical; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(value||'')}</textarea></div>`;
+      return `<div class="field form-question">${labelBlock}<textarea id="${idAttr}" rows="1" class="auto-grow-textarea" style="resize:vertical; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(value||'')}</textarea></div>`;
     case 'email':
-      return `<div class="field">${labelBlock}<input type="email" id="${idAttr}" placeholder="name@example.com" value="${escapeHtml(value||'')}"></div>`;
+      return `<div class="field form-question">${labelBlock}<input type="email" id="${idAttr}" placeholder="name@example.com" value="${escapeHtml(value||'')}"></div>`;
     case 'select':
-      return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
+      return `<div class="field form-question">${labelBlock}<select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
     case 'yesno':
-      return `<div class="field">${labelBlock}<select id="${idAttr}"><option value="">Select…</option><option value="Yes" ${value==='Yes'?'selected':''}>Yes</option><option value="No" ${value==='No'?'selected':''}>No</option></select></div>`;
+      return `<div class="field form-question">${labelBlock}<select id="${idAttr}"><option value="">Select…</option><option value="Yes" ${value==='Yes'?'selected':''}>Yes</option><option value="No" ${value==='No'?'selected':''}>No</option></select></div>`;
     case 'file':
-      return `<div class="field">${labelBlock}<div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
+      return `<div class="field form-question">${labelBlock}<div class="file-drop"><input type="file" id="${idAttr}">${fileName?`<div class="fname">Selected: ${escapeHtml(fileName)}</div>`:''}</div></div>`;
     case 'audio': {
       const hasRecording = !!previewUrl;
-      return `<div class="field">${labelBlock}
+      return `<div class="field form-question">${labelBlock}
         <div data-audio-widget="${field.id}">
           ${hasRecording ? `
             <audio controls src="${escapeHtml(previewUrl)}" style="width:100%; margin-bottom:8px;"></audio>
@@ -2186,9 +2193,9 @@ function renderDynamicField(formKey, field, value, fileName, previewUrl){
       </div>`;
     }
     case 'image':
-      return `<div class="field">${labelBlock}<img src="${resolveFieldImageSrc(field.imageKey)}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
+      return `<div class="field form-question">${labelBlock}<img src="${resolveFieldImageSrc(field.imageKey)}" alt="Reference" style="width:100%; border-radius:8px; border:1px solid var(--line); margin-top:6px;"></div>`;
     case 'checkbox':
-      return `<div class="apply-section"><label class="checkbox-item" style="cursor:pointer; margin-top:10px;"><input type="checkbox" id="${idAttr}" ${value?'checked':''}> <span style="white-space:pre-wrap;">${escapeHtml(field.label)}</span></label></div>`;
+      return `<div class="apply-section form-question"><label class="checkbox-item" style="cursor:pointer; margin-top:0; background:transparent; border:none; padding:0;"><input type="checkbox" id="${idAttr}" ${value?'checked':''}> <span style="white-space:pre-wrap;">${escapeHtml(field.label)}</span></label></div>`;
     case 'notice':
       return `<div class="warn-box strong"><div class="icon">💬</div><div class="txt" style="white-space:pre-wrap;">${escapeHtml(field.label)}</div></div>`;
     default:
@@ -2667,6 +2674,7 @@ const TAB_GROUPS = [
       ['terminatedTutors','Terminated']
     ]
   },
+  { label: 'Tutors', tab: 'tutorList' },
   { label: 'Forms', children: [
       ['formBuilderApply','Apply Form'],
       ['formBuilderDevice','Device Form'],
@@ -2748,6 +2756,7 @@ function renderAdmin(){
   else if(adminTab==='tutorChats') body = renderAdminTutorChats();
   else if(adminTab==='resignedTutors') body = renderAdminFormerTutors('resigned');
   else if(adminTab==='terminatedTutors') body = renderAdminFormerTutors('terminated');
+  else if(adminTab==='tutorList') body = renderAdminTutorList();
   else if(adminTab==='archiveApplication') body = renderAdminArchiveApplications();
   else if(adminTab==='archive1stDemo') body = renderAdminArchive('1stDemo');
   else if(adminTab==='archive2ndDemo') body = renderAdminArchive('2ndDemo');
@@ -3943,6 +3952,54 @@ function renderAdminFormerTutors(status){
     </div>
     <table class="list-table">
       <thead><tr><th>Tutor</th><th>Date</th><th>Note</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+let tutorListSearchQuery = '';
+// A plain roster of everyone registered as a tutor — unlike Tutor Chats,
+// this isn't about conversations at all, just "who's on the team right
+// now" with their basic info and employment status in one place.
+function renderAdminTutorList(){
+  const active = bookings.filter(b => b.tutorAccountCreated === true && !isFormerTutor(b));
+  const q = tutorListSearchQuery.trim().toLowerCase();
+  const filtered = q
+    ? active.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.adminChatLabel||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q))
+    : active;
+  const sorted = [...filtered].sort((a,b) => (a.adminChatLabel||a.fullName||'').localeCompare(b.adminChatLabel||b.fullName||''));
+
+  const emptyMessage = active.length === 0 ? 'No tutors registered yet.' : 'No one matches that search.';
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+    const displayLabel = b.adminChatLabel || b.fullName;
+    const joinedDate = b.submittedAt || b.bookedAt;
+    return `
+    <tr>
+      <td><strong>${escapeHtml(displayLabel)}</strong>${b.existingTutor ? ' <span style="color:var(--slate-light); font-size:10.5px; font-weight:400;">(existing tutor)</span>' : ''}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span>${(b.adminChatLabel && b.adminChatLabel!==b.fullName) ? `<br><span style="color:var(--slate-light); font-size:10.5px;">Full name: ${escapeHtml(b.fullName)}</span>` : ''}</td>
+      <td class="tag">${joinedDate ? new Date(joinedDate).toLocaleDateString('en-US') : '—'}</td>
+      <td>
+        <select data-employment-status="${b.id}" style="padding:7px 9px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
+          <option value="active" selected>Active</option>
+          <option value="resigned">Resigned</option>
+          <option value="terminated">Terminated</option>
+        </select>
+      </td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Chat</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="tutorListSearchInput" placeholder="Search by name or email…" value="${escapeHtml(tutorListSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <span style="font-size:12.5px; color:var(--slate-light); white-space:nowrap;">${active.length} active tutor${active.length===1?'':'s'}</span>
+    </div>
+    <table class="list-table">
+      <thead><tr><th>Tutor</th><th>Joined</th><th>Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -5398,7 +5455,7 @@ function attachHandlers(){
       stopDevicePolling();
     }
 
-    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
+    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='tutorList' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
       startBookingsPolling();
     } else {
       stopBookingsPolling();
@@ -5814,6 +5871,44 @@ Langdy Team`;
       });
       $$('[data-delete-tutor-chat]').forEach(el=>{
         el.onclick = () => { deleteTutorChatTarget = el.dataset.deleteTutorChat; render(); };
+      });
+    }
+
+    if(adminTab==='tutorList'){
+      const searchInput = $('#tutorListSearchInput');
+      if(searchInput){
+        searchInput.oninput = e => { tutorListSearchQuery = e.target.value; render(); };
+        searchInput.focus();
+        searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+      }
+      $$('[data-chat-id]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.chatId;
+          chatTarget = bookings.find(b=>b.id===id);
+          chatDraftText = '';
+          render();
+          await markChatReadByAdmin(id);
+          render();
+        };
+      });
+      $$('[data-employment-status]').forEach(el=>{
+        el.onchange = async () => {
+          const id = el.dataset.employmentStatus;
+          const status = el.value;
+          if(status === 'active') return;
+          const b = bookings.find(x=>x.id===id);
+          if(!b) return;
+          const label = status === 'terminated' ? 'terminated' : 'resigned';
+          if(!confirm(`Mark ${b.fullName} as ${label}? They'll move to the Resigned/Terminated tab, but can still chat with you — access isn't affected.`)){
+            el.value = 'active';
+            return;
+          }
+          const idx = bookings.findIndex(x=>x.id===id);
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: status, tutorEmploymentDate: new Date().toISOString() });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
       });
     }
 
