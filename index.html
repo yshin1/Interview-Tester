@@ -994,6 +994,13 @@ async function saveConfig(next){
   }
 }
 const BOOKINGS_COLLECTION = 'bookings';
+// Chat messages live in a subcollection under each booking, rather than an
+// array field on the booking document itself — a single Firestore document
+// has a 1MB size cap, and an array of every message ever exchanged with one
+// tutor would eventually approach that after months of daily chatting. The
+// booking document keeps lightweight "lastMessage*" and unread-count summary
+// fields so lists/notifications never need to read the subcollection at all.
+const MESSAGES_SUBCOLLECTION = 'messages';
 
 // Same loadBookings()/saveBookings(next) signatures as before — every
 // existing call site throughout the app keeps working unchanged. Internally,
@@ -1146,19 +1153,29 @@ async function sendChatMessage(bookingId, from, text, fileInfo){
   if(!trimmed && !fileInfo) return false;
   const msg = { from, text: trimmed, at: new Date().toISOString() };
   if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
-  // Atomic single-document update — no need to read the whole collection
-  // first just to append one message. arrayUnion is safe under concurrent
-  // writes from both sides of the chat at once.
-  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({
-    messages: firebase.firestore.FieldValue.arrayUnion(msg)
-  });
+
+  const bookingRef = db.collection(BOOKINGS_COLLECTION).doc(bookingId);
+  const msgRef = bookingRef.collection(MESSAGES_SUBCOLLECTION).doc();
+  const summaryPatch = {
+    lastMessageText: trimmed || (fileInfo ? '📎 Sent a file' : ''),
+    lastMessageAt: msg.at,
+    lastMessageFrom: from
+  };
+  // Whoever DIDN'T send this message gets their unread counter bumped —
+  // reset back to 0 by markChatReadByAdmin/markChatReadByApplicant.
+  summaryPatch[from === 'admin' ? 'unreadCountForApplicant' : 'unreadCountForAdmin'] = firebase.firestore.FieldValue.increment(1);
+
+  // One atomic write across the new message doc + the parent's summary
+  // fields — either both land or neither does.
+  const batch = db.batch();
+  batch.set(msgRef, msg);
+  batch.update(bookingRef, summaryPatch);
+  await batch.commit();
   // Deliberately NOT also pushing this message into the local `bookings`
-  // array here — the real-time listener already watching this booking (via
-  // startChatPolling) reflects Firestore's own local-write cache the moment
-  // this update lands, often before this line would even run. Doing both
-  // was adding the same message twice to the in-memory array — the message
-  // showing up doubled in the thread until the next send silently "fixed"
-  // it by re-deriving state fresh from the next snapshot.
+  // array here — the real-time subcollection listener already watching this
+  // booking (via startChatPolling) reflects Firestore's own local-write
+  // cache the moment this update lands, often before this line would even
+  // run. Doing both was adding the same message twice to the in-memory array.
   return true;
 }
 // Turns any http(s) URL inside an already-escaped message into a clickable
@@ -1210,7 +1227,7 @@ function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, 
       if(!seen) unreadBadge = `<span class="chat-unread-badge">1</span>`;
     }
     const bubble = `<div class="chat-bubble ${mine?'mine':'theirs'}">
-      <div class="who">${mine ? 'You' : who}${canDelete ? ` <button class="link-btn" data-delete-msg="${escapeHtml(bookingId)}" data-msg-index="${i}" style="font-size:10.5px; padding:0; margin-left:6px; color:var(--danger);" title="Delete message">🗑</button>` : ''}</div>
+      <div class="who">${mine ? 'You' : who}${canDelete ? ` <button class="link-btn" data-delete-msg="${escapeHtml(bookingId)}" data-msg-id="${escapeHtml(m.id||'')}" style="font-size:10.5px; padding:0; margin-left:6px; color:var(--danger);" title="Delete message">🗑</button>` : ''}</div>
       ${m.text ? linkify(escapeHtml(m.text).replace(/\n/g,'<br>')) : ''}
       ${renderChatFileAttachment(m)}
       <div class="t">${time}</div>
@@ -1226,15 +1243,17 @@ function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, 
     </div>`;
   }).join('');
 }
+// Now just reads a running counter maintained on the booking document
+// itself (incremented on send, reset to 0 on read) — no need to read the
+// messages subcollection at all just to show a badge count.
 function unreadCountForAdmin(b){
-  const lastRead = b.lastReadByAdmin ? new Date(b.lastReadByAdmin) : new Date(0);
-  return (b.messages||[]).filter(m => m.from==='applicant' && new Date(m.at) > lastRead).length;
+  return b.unreadCountForAdmin || 0;
 }
 async function markChatReadByAdmin(bookingId){
   const now = new Date().toISOString();
-  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByAdmin: now });
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByAdmin: now, unreadCountForAdmin: 0 });
   const idx = bookings.findIndex(b => b.id === bookingId);
-  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByAdmin: now });
+  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByAdmin: now, unreadCountForAdmin: 0 });
   // Checking a booking's chat for the first time is a clear, natural signal
   // that admin has looked at it — covers cases like marking a 2nd demo
   // result straight from the quick dropdown in the list, which (unlike
@@ -1246,14 +1265,13 @@ async function markChatReadByAdmin(bookingId){
 // ADMIN's messages — powers the "Seen" read-receipt shown under the
 // admin's own messages in the chat thread.
 function unreadCountForApplicant(b){
-  const lastRead = b.lastReadByApplicant ? new Date(b.lastReadByApplicant) : new Date(0);
-  return (b.messages||[]).filter(m => m.from==='admin' && new Date(m.at) > lastRead).length;
+  return b.unreadCountForApplicant || 0;
 }
 async function markChatReadByApplicant(bookingId){
   const now = new Date().toISOString();
-  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByApplicant: now });
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByApplicant: now, unreadCountForApplicant: 0 });
   const idx = bookings.findIndex(b => b.id === bookingId);
-  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByApplicant: now });
+  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByApplicant: now, unreadCountForApplicant: 0 });
 }
 
 // Guideline messages auto-sent once the applicant's chat message contains
@@ -1293,13 +1311,23 @@ async function sendApplicantMessage(bookingId, text, fileInfo){
   if(fileInfo){ msg.fileUrl = fileInfo.url; msg.fileName = fileInfo.name; msg.fileType = fileInfo.type; }
 
   let shouldSendGuideline = false;
-  const patch = { messages: firebase.firestore.FieldValue.arrayUnion(msg) };
+  const bookingRef = db.collection(BOOKINGS_COLLECTION).doc(bookingId);
+  const msgRef = bookingRef.collection(MESSAGES_SUBCOLLECTION).doc();
+  const summaryPatch = {
+    lastMessageText: trimmed || (fileInfo ? '📎 Sent a file' : ''),
+    lastMessageAt: msg.at,
+    lastMessageFrom: 'applicant',
+    unreadCountForAdmin: firebase.firestore.FieldValue.increment(1)
+  };
   const name = (b.fullName||'').trim().toLowerCase();
   if(!b.guidelineSent && name && trimmed.toLowerCase().includes(name)){
-    patch.guidelineSent = true; // mark immediately so it can never double-trigger, even mid-sequence
+    summaryPatch.guidelineSent = true; // mark immediately so it can never double-trigger, even mid-sequence
     shouldSendGuideline = true;
   }
-  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update(patch);
+  const batch = db.batch();
+  batch.set(msgRef, msg);
+  batch.update(bookingRef, summaryPatch);
+  await batch.commit();
   // No manual local `bookings` update here — see the matching note in
   // sendChatMessage(). The real-time listener already reflects this the
   // moment the write lands, and doing both was doubling the message.
@@ -1323,28 +1351,48 @@ async function sendGuidelineMessagesWithDelay(bookingId, dateLabel, time){
 }
 
 let chatPollBookingId = null;
-let chatUnsubscribe = null;
-// Real-time listener on just the ONE booking being viewed, instead of
-// re-reading the entire bookings collection every few seconds. Firestore
-// only bills for what actually changed after the initial snapshot, so a
-// chat window left open no longer costs a full-collection read every tick.
+let chatMessagesUnsubscribe = null;
+let chatDocUnsubscribe = null;
+// Two listeners run together while a chat is open: one on the messages
+// subcollection (for the thread itself), and one on the parent booking
+// document (for lastReadByAdmin/lastReadByApplicant and anything else
+// about the booking) — needed because the "Seen" read receipt lives on the
+// booking doc, not in the messages subcollection, and wouldn't otherwise
+// update in real time while the other side is actively reading. Each
+// listener's callback merges into the shared local booking object without
+// clobbering what the other one contributed.
 function startChatPolling(bookingId, onTick){
   if(chatPollBookingId === bookingId) return; // already listening to this thread
   stopChatPolling();
   chatPollBookingId = bookingId;
-  chatUnsubscribe = db.collection(BOOKINGS_COLLECTION).doc(bookingId).onSnapshot(doc => {
+  const bookingRef = db.collection(BOOKINGS_COLLECTION).doc(bookingId);
+
+  chatDocUnsubscribe = bookingRef.onSnapshot(doc => {
     if(!doc.exists) return;
-    const updated = Object.assign({ id: doc.id }, doc.data());
+    const freshFields = Object.assign({ id: doc.id }, doc.data());
     const idx = bookings.findIndex(b => b.id === bookingId);
-    if(idx !== -1) bookings[idx] = updated; else bookings.push(updated);
+    const existingMessages = idx !== -1 ? bookings[idx].messages : undefined;
+    const merged = existingMessages ? Object.assign(freshFields, { messages: existingMessages }) : freshFields;
+    if(idx !== -1) bookings[idx] = merged; else bookings.push(merged);
     onTick();
-  }, err => {
-    console.error('Chat listener error:', err);
-  });
+  }, err => console.error('Chat doc listener error:', err));
+
+  chatMessagesUnsubscribe = bookingRef.collection(MESSAGES_SUBCOLLECTION).orderBy('at', 'asc').onSnapshot(snap => {
+    const messages = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+    const idx = bookings.findIndex(b => b.id === bookingId);
+    if(idx !== -1){
+      bookings[idx] = Object.assign({}, bookings[idx], { messages });
+    } else {
+      bookings.push({ id: bookingId, messages });
+    }
+    onTick();
+  }, err => console.error('Chat messages listener error:', err));
 }
 function stopChatPolling(){
-  if(chatUnsubscribe) chatUnsubscribe();
-  chatUnsubscribe = null;
+  if(chatDocUnsubscribe) chatDocUnsubscribe();
+  if(chatMessagesUnsubscribe) chatMessagesUnsubscribe();
+  chatDocUnsubscribe = null;
+  chatMessagesUnsubscribe = null;
   chatPollBookingId = null;
 }
 
@@ -1454,25 +1502,34 @@ function startBookingsPolling(){
   if(bookingsListenerActive) return;
   bookingsListenerActive = true;
   bookingsUnsubscribe = db.collection(BOOKINGS_COLLECTION).onSnapshot(snap => {
-    const newBookings = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+    const oldById = {};
+    bookings.forEach(b => { oldById[b.id] = b; });
+    const newBookings = snap.docs.map(doc => {
+      const data = Object.assign({ id: doc.id }, doc.data());
+      // Messages now live in a subcollection, not in this document's own
+      // data — this collection-wide listener never sees them. Whatever a
+      // dedicated startChatPolling() subscription already attached locally
+      // (for whichever chat happens to be open) needs to survive this
+      // refresh rather than getting silently wiped back to nothing.
+      const old = oldById[doc.id];
+      if(old && old.messages) data.messages = old.messages;
+      return data;
+    });
     if(view==='admin'){
       // Detect newly-arrived applicant/tutor messages across EVERY booking
       // (not just whichever chat is currently open) so admin gets notified
-      // even while browsing a list instead of a specific conversation.
+      // even while browsing a list instead of a specific conversation —
+      // driven by the lightweight lastMessage* summary fields instead of
+      // reading each booking's messages subcollection.
       newBookings.forEach(nb => {
-        const newMsgs = nb.messages || [];
-        const prevCount = chatKnownMessageCounts[nb.id];
+        const prevAt = chatKnownLastMessageAt[nb.id];
         // Skip the very first snapshot for a booking — otherwise every
-        // pre-existing message would fire a notification the moment the
-        // listener starts, instead of only genuinely new ones.
-        if(prevCount !== undefined && newMsgs.length > prevCount){
-          newMsgs.slice(prevCount).forEach(m => {
-            if(m.from === 'applicant'){
-              maybeShowChatNotification(nb.adminChatLabel || nb.fullName, m.text, nb.id, chatTarget ? chatTarget.id : null);
-            }
-          });
+        // pre-existing conversation would fire a notification the moment
+        // the listener starts, instead of only genuinely new messages.
+        if(prevAt !== undefined && nb.lastMessageAt && nb.lastMessageAt !== prevAt && nb.lastMessageFrom === 'applicant'){
+          maybeShowChatNotification(nb.adminChatLabel || nb.fullName, nb.lastMessageText, nb.id, chatTarget ? chatTarget.id : null);
         }
-        chatKnownMessageCounts[nb.id] = newMsgs.length;
+        chatKnownLastMessageAt[nb.id] = nb.lastMessageAt || null;
       });
     }
     bookings = newBookings;
@@ -2207,10 +2264,65 @@ function renderDynamicForm(formKey, schema, state){
 }
 
 let dynamicFormState = {
-  apply: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false },
-  device: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false },
-  signup: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false }
+  apply: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false, draftPromptDismissed:false },
+  device: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false, draftPromptDismissed:false },
+  signup: { answers:{}, files:{}, filePreviews:{}, error:'', busy:false, done:false, draftPromptDismissed:false }
 };
+
+// Auto-saves text answers as the person types, so a refresh or accidentally
+// closed tab doesn't lose everything — files/recordings can't be persisted
+// this way (browsers won't let a site re-read a File object across a
+// reload), so the person re-attaches those, but the text side survives.
+// Wrapped in try/catch since localStorage can throw (private browsing,
+// storage disabled, quota) — a failed autosave should never break the form.
+const FORM_DRAFT_KEY_PREFIX = 'langdy_form_draft_';
+function saveFormDraft(formKey){
+  try{
+    const state = dynamicFormState[formKey];
+    const hasAnyAnswer = Object.values(state.answers).some(v => v !== '' && v != null && v !== false);
+    if(!hasAnyAnswer){
+      localStorage.removeItem(FORM_DRAFT_KEY_PREFIX + formKey);
+      return;
+    }
+    localStorage.setItem(FORM_DRAFT_KEY_PREFIX + formKey, JSON.stringify({ answers: state.answers, savedAt: new Date().toISOString() }));
+  }catch(e){ /* ignore — autosave is a nicety, not a requirement */ }
+}
+function loadFormDraft(formKey){
+  try{
+    const raw = localStorage.getItem(FORM_DRAFT_KEY_PREFIX + formKey);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    if(!parsed || typeof parsed.answers !== 'object') return null;
+    return parsed;
+  }catch(e){ return null; }
+}
+function clearFormDraft(formKey){
+  try{ localStorage.removeItem(FORM_DRAFT_KEY_PREFIX + formKey); }catch(e){ /* ignore */ }
+}
+// Shown above a form when a saved draft exists and the person hasn't yet
+// typed anything in THIS session — lets them pick up where they left off
+// instead of silently losing everything to a refresh or closed tab.
+function renderDraftRestoreBanner(formKey){
+  const state = dynamicFormState[formKey];
+  if(state.draftPromptDismissed) return '';
+  const hasStartedTyping = Object.values(state.answers).some(v => v !== '' && v != null && v !== false);
+  if(hasStartedTyping) return '';
+  const draft = loadFormDraft(formKey);
+  if(!draft) return '';
+  const savedDate = draft.savedAt ? new Date(draft.savedAt) : null;
+  const savedLabel = savedDate ? savedDate.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+  return `
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:14px 18px; margin-bottom:20px; border-radius:12px; background:rgba(199,154,59,0.10); border:1.5px solid rgba(199,154,59,0.4);">
+    <div>
+      <div style="font-size:13.5px; font-weight:700;">You have unfinished answers from before${savedLabel ? ` (${savedLabel})` : ''}</div>
+      <div style="font-size:12px; color:var(--slate-light); margin-top:2px;">Files and recordings couldn't be saved and will need to be re-attached.</div>
+    </div>
+    <div style="display:flex; gap:8px; flex-shrink:0;">
+      <button type="button" class="btn btn-ghost btn-sm" id="draftDismissBtn_${formKey}" style="width:auto; padding:9px 14px;">Start Fresh</button>
+      <button type="button" class="btn btn-gold btn-sm" id="draftRestoreBtn_${formKey}" style="width:auto; padding:9px 16px;">Continue Where I Left Off</button>
+    </div>
+  </div>`;
+}
 
 function findNameForDone(schema, answers){
   const nameField = schema.find(f => f.id==='fullName' || f.id==='tutorName');
@@ -2226,6 +2338,7 @@ function renderApplyPage(){
     <div class="card">
       <h1 class="gate-title">Langdy Tutor Application</h1>
       <p class="gate-sub">Please fill out this form to apply as a Langdy tutor.</p>
+      ${renderDraftRestoreBanner('apply')}
       ${renderDynamicForm('apply', schema, state)}
       ${state.error ? `<div class="error-text">${escapeHtml(state.error)}</div>` : ''}
       <button class="btn btn-gold" id="applySubmitBtn" ${state.busy?'disabled':''}>${state.busy?'Submitting…':'Submit Application'}</button>
@@ -2260,6 +2373,7 @@ function renderSignupFormPage(){
     <div class="card">
       <h1 class="gate-title">Account Signup</h1>
       <p class="gate-sub">Please complete this form to finish creating your Langdy tutor account.</p>
+      ${renderDraftRestoreBanner('signup')}
       ${renderDynamicForm('signup', schema, state)}
       ${state.error ? `<div class="error-text">${escapeHtml(state.error)}</div>` : ''}
       <button class="btn btn-gold" id="signupSubmitBtn" ${state.busy?'disabled':''}>${state.busy?'Submitting…':'Submit'}</button>
@@ -2294,6 +2408,7 @@ function renderDeviceFormPage(){
     <div class="card">
       <h1 class="gate-title">Device Submission</h1>
       <p class="gate-sub">Please complete this form so we can verify your computer, power, and internet setup.</p>
+      ${renderDraftRestoreBanner('device')}
       ${renderDynamicForm('device', schema, state)}
       ${state.error ? `<div class="error-text">${escapeHtml(state.error)}</div>` : ''}
       <button class="btn btn-gold" id="deviceSubmitBtn" ${state.busy?'disabled':''}>${state.busy?'Submitting…':'Submit'}</button>
@@ -2535,8 +2650,16 @@ let chatNotificationsEnabled = true;
 // Tracks the last-seen message count per booking, so an incoming real-time
 // update can tell "N new messages just got added" apart from any other
 // change to the document — used purely to decide when to fire a
-// notification.
+// notification. Used on the applicant/tutor's own chat view, where the full
+// subcollection-sourced messages array for that one conversation is already
+// available locally.
 let chatKnownMessageCounts = {};
+// Same idea, but for admin's collection-wide notification detection across
+// EVERY booking at once — driven by the lastMessageAt summary field instead
+// of message counts, since reading every booking's full messages
+// subcollection just to detect "did something change" would defeat the
+// point of moving messages out of the booking document in the first place.
+let chatKnownLastMessageAt = {};
 async function requestChatNotificationPermission(){
   if(typeof Notification === 'undefined') return;
   try{
@@ -3610,6 +3733,11 @@ let chatsFilterStage = 'all'; // 'all' | '1st' | '2nd'
 let chatsSearchQuery = '';
 
 function lastMessageInfo(b){
+  if(b.lastMessageAt){
+    return { from: b.lastMessageFrom, text: b.lastMessageText, at: b.lastMessageAt };
+  }
+  // Fallback for any pre-migration record that still has an embedded
+  // messages array instead of the lastMessage* summary fields.
   const msgs = (b.messages || []).filter(m => m.from !== 'system');
   if(msgs.length === 0) return null;
   return msgs[msgs.length - 1];
@@ -4687,6 +4815,18 @@ function attachHandlers(){
     const formKey = 'apply';
     const state = dynamicFormState[formKey];
     const schema = formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA;
+    const draftRestoreBtn = $('#draftRestoreBtn_apply');
+    if(draftRestoreBtn) draftRestoreBtn.onclick = () => {
+      const draft = loadFormDraft('apply');
+      if(draft) state.answers = Object.assign({}, draft.answers);
+      render();
+    };
+    const draftDismissBtn = $('#draftDismissBtn_apply');
+    if(draftDismissBtn) draftDismissBtn.onclick = () => {
+      clearFormDraft('apply');
+      state.draftPromptDismissed = true;
+      render();
+    };
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image') return;
       if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
@@ -4700,12 +4840,13 @@ function attachHandlers(){
           render();
         };
       } else if(field.type === 'select' || field.type === 'yesno'){
-        el.onchange = e => { state.answers[field.id] = e.target.value; };
+        el.onchange = e => { state.answers[field.id] = e.target.value; saveFormDraft(formKey); };
       } else {
         if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
         el.oninput = e => {
           state.answers[field.id] = e.target.value;
           if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+          saveFormDraft(formKey);
         };
       }
     });
@@ -4761,6 +4902,7 @@ function attachHandlers(){
           return;
         }
         await saveOneApplication(record);
+        clearFormDraft('apply');
         state.busy = false; state.done = true; render();
       }catch(e){
         console.error('APPLICATION SUBMIT ERROR:', e);
@@ -4774,6 +4916,18 @@ function attachHandlers(){
     const formKey = 'signup';
     const state = dynamicFormState[formKey];
     const schema = formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA;
+    const draftRestoreBtn = $('#draftRestoreBtn_signup');
+    if(draftRestoreBtn) draftRestoreBtn.onclick = () => {
+      const draft = loadFormDraft('signup');
+      if(draft) state.answers = Object.assign({}, draft.answers);
+      render();
+    };
+    const draftDismissBtn = $('#draftDismissBtn_signup');
+    if(draftDismissBtn) draftDismissBtn.onclick = () => {
+      clearFormDraft('signup');
+      state.draftPromptDismissed = true;
+      render();
+    };
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image' || field.type === 'notice') return;
       if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
@@ -4787,14 +4941,15 @@ function attachHandlers(){
           render();
         };
       } else if(field.type === 'checkbox'){
-        el.onchange = e => { state.answers[field.id] = e.target.checked; };
+        el.onchange = e => { state.answers[field.id] = e.target.checked; saveFormDraft(formKey); };
       } else if(field.type === 'select' || field.type === 'yesno'){
-        el.onchange = e => { state.answers[field.id] = e.target.value; };
+        el.onchange = e => { state.answers[field.id] = e.target.value; saveFormDraft(formKey); };
       } else {
         if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
         el.oninput = e => {
           state.answers[field.id] = e.target.value;
           if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+          saveFormDraft(formKey);
         };
       }
     });
@@ -4840,6 +4995,7 @@ function attachHandlers(){
         }
         await Promise.all(uploadTasks);
         await saveOneAccountSignup(record);
+        clearFormDraft('signup');
         state.busy = false; state.done = true; render();
       }catch(e){
         console.error('SIGNUP SUBMIT ERROR:', e);
@@ -4853,6 +5009,18 @@ function attachHandlers(){
     const formKey = 'device';
     const state = dynamicFormState[formKey];
     const schema = formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA;
+    const draftRestoreBtn = $('#draftRestoreBtn_device');
+    if(draftRestoreBtn) draftRestoreBtn.onclick = () => {
+      const draft = loadFormDraft('device');
+      if(draft) state.answers = Object.assign({}, draft.answers);
+      render();
+    };
+    const draftDismissBtn = $('#draftDismissBtn_device');
+    if(draftDismissBtn) draftDismissBtn.onclick = () => {
+      clearFormDraft('device');
+      state.draftPromptDismissed = true;
+      render();
+    };
     schema.forEach(field => {
       if(field.type === 'section' || field.type === 'image') return;
       if(field.type === 'audio'){ wireAudioField(formKey, field, state, render); return; }
@@ -4866,12 +5034,13 @@ function attachHandlers(){
           render();
         };
       } else if(field.type === 'select' || field.type === 'yesno'){
-        el.onchange = e => { state.answers[field.id] = e.target.value; };
+        el.onchange = e => { state.answers[field.id] = e.target.value; saveFormDraft(formKey); };
       } else {
         if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
         el.oninput = e => {
           state.answers[field.id] = e.target.value;
           if(el.classList.contains('auto-grow-textarea')) autoGrowTextarea(el);
+          saveFormDraft(formKey);
         };
       }
     });
@@ -4903,6 +5072,7 @@ function attachHandlers(){
         }
         await Promise.all(uploadTasks);
         await saveOneDeviceSubmission(record);
+        clearFormDraft('device');
         state.busy = false; state.done = true; render();
       }catch(e){
         console.error('DEVICE SUBMIT ERROR:', e);
@@ -5105,7 +5275,6 @@ function attachHandlers(){
           secondDemoResult: 'pass',
           existingTutor: true,
           tutorAccountCreated: true, // set true up front since we're creating their own login right now
-          messages: [],
           submittedAt: new Date().toISOString()
         };
         try{
@@ -5213,6 +5382,7 @@ function attachHandlers(){
             if(used >= cap){
               bk.busy=false; bk.error='Sorry, another applicant just booked this time. Please choose another slot.'; bk.step=2; bk.time=null; render(); return;
             }
+            const welcomeAt = new Date().toISOString();
             newBooking = {
               id: 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
               fullName: bk.fullName.trim(),
@@ -5220,9 +5390,13 @@ function attachHandlers(){
               date: bk.date,
               time: bk.time,
               bookedAt: new Date().toISOString(),
-              messages: [{ from:'system', text:'Please start by sending your Full Name!', at: new Date().toISOString() }],
+              lastMessageText: 'Please start by sending your Full Name!',
+              lastMessageAt: welcomeAt,
+              lastMessageFrom: 'system',
               guidelineSent: false,
               lastReadByAdmin: null,
+              unreadCountForAdmin: 0,
+              unreadCountForApplicant: 0,
               viewedByAdmin: false,
               assignedTo: defaultAssigneeFor(bk.date, bk.time),
               onboardingStatus: '',
@@ -5242,6 +5416,12 @@ function attachHandlers(){
               deviceNote: ''
             };
             await saveBookings([...bookings, newBooking]);
+            // The welcome message lives in the subcollection, same as every
+            // other chat message — the booking doc only carries the
+            // lastMessage* summary shown in list previews.
+            await db.collection(BOOKINGS_COLLECTION).doc(newBooking.id).collection(MESSAGES_SUBCOLLECTION).add({
+              from: 'system', text: 'Please start by sending your Full Name!', at: welcomeAt
+            });
             // Verify the write actually stuck — the shared storage is "last write wins",
             // so if someone else wrote in the same instant, our booking (or theirs) could
             // have been silently clobbered. Re-read and confirm before declaring success.
@@ -6533,12 +6713,26 @@ Langdy Team`;
       $('#deleteTutorChatOverlay').onclick = (e) => { if(e.target.id==='deleteTutorChatOverlay'){ deleteTutorChatTarget=null; render(); } };
       $('#deleteTutorChatYesBtn').onclick = async () => {
         const id = deleteTutorChatTarget;
-        const booking = bookings.find(b => b.id === id);
-        if(booking && booking.messages){
-          await Promise.all(booking.messages.filter(m => m.fileUrl).map(m => deleteStorageFileByUrl(m.fileUrl)));
+        // Query the subcollection directly rather than relying on the local
+        // `messages` array — that's only populated once admin has actually
+        // opened this specific chat, so it could be empty even when the
+        // subcollection itself has plenty of messages in it.
+        const msgsSnap = await db.collection(BOOKINGS_COLLECTION).doc(id).collection(MESSAGES_SUBCOLLECTION).get();
+        const fileUrls = msgsSnap.docs.map(d => d.data().fileUrl).filter(Boolean);
+        await Promise.all(fileUrls.map(deleteStorageFileByUrl));
+        // Firestore never auto-deletes a subcollection when its parent
+        // document is deleted — each message doc has to go explicitly. A
+        // batch tops out at 500 operations, and a long-running daily
+        // conversation can genuinely exceed that after a few months, so
+        // this chunks the deletes instead of assuming one batch is enough.
+        const CHUNK_SIZE = 450;
+        for(let i = 0; i < msgsSnap.docs.length; i += CHUNK_SIZE){
+          const chunkBatch = db.batch();
+          msgsSnap.docs.slice(i, i + CHUNK_SIZE).forEach(d => chunkBatch.delete(d.ref));
+          await chunkBatch.commit();
         }
-        const next = bookings.filter(b => b.id !== id);
-        await saveBookings(next);
+        await db.collection(BOOKINGS_COLLECTION).doc(id).delete();
+        bookings = bookings.filter(b => b.id !== id);
         deleteTutorChatTarget = null;
         render();
       };
@@ -6566,7 +6760,6 @@ Langdy Team`;
           secondDemoResult: 'pass',
           existingTutor: true,
           tutorAccountCreated: false,
-          messages: [],
           submittedAt: new Date().toISOString()
         };
         await saveBookings([...bookings, newRecord]);
@@ -6808,18 +7001,29 @@ Langdy Team`;
       $$('[data-delete-msg]').forEach(el=>{
         el.onclick = async () => {
           const bookingId = el.dataset.deleteMsg;
-          const msgIndex = Number(el.dataset.msgIndex);
+          const msgId = el.dataset.msgId;
+          if(!msgId) return;
           if(!confirm('Delete this message? This cannot be undone.')) return;
           const idx = bookings.findIndex(x=>x.id===bookingId);
           if(idx === -1) return;
-          const msgs = [...(bookings[idx].messages||[])];
-          const deletedMsg = msgs[msgIndex];
-          msgs.splice(msgIndex, 1);
-          if(deletedMsg && deletedMsg.fileUrl) await deleteStorageFileByUrl(deletedMsg.fileUrl);
-          const updated = Object.assign({}, bookings[idx], { messages: msgs });
-          const next = [...bookings]; next[idx] = updated;
-          await saveBookings(next);
-          if(chatTarget && chatTarget.id === bookingId) chatTarget = updated;
+          const msgs = bookings[idx].messages || [];
+          const deletedMsg = msgs.find(m => m.id === msgId);
+          if(!deletedMsg) return;
+          if(deletedMsg.fileUrl) await deleteStorageFileByUrl(deletedMsg.fileUrl);
+          await db.collection(BOOKINGS_COLLECTION).doc(bookingId).collection(MESSAGES_SUBCOLLECTION).doc(msgId).delete();
+          // If the deleted message was the most recent one, the list
+          // preview needs to fall back to whatever's now last (or go blank
+          // if that was the only message) — otherwise it'd keep showing a
+          // message that no longer exists until the next new one arrives.
+          const remaining = msgs.filter(m => m.id !== msgId);
+          const newLast = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+          await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({
+            lastMessageText: newLast ? (newLast.text || (newLast.fileUrl ? '📎 Sent a file' : '')) : '',
+            lastMessageAt: newLast ? newLast.at : null,
+            lastMessageFrom: newLast ? newLast.from : null
+          });
+          // The subcollection listener will pick up the deletion and refresh
+          // the local messages array on its own — no manual update needed.
           render();
         };
       });
