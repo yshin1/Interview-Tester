@@ -5661,7 +5661,14 @@ function attachHandlers(){
             });
           }
           chatKnownMessageCounts[bk.id] = newMsgs.length;
-          if(unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
+          // Only mark as read while the person is actually looking at this
+          // tab (visible AND focused) — marking it read the instant a new
+          // message merely ARRIVES, regardless of whether anyone's watching,
+          // meant the admin's "Seen" indicator lied about whether the
+          // applicant had really seen it, and made it look like new
+          // messages were always "already read" the moment they landed.
+          const tabActivelyFocused = document.visibilityState === 'visible' && document.hasFocus();
+          if(tabActivelyFocused && unreadCountForApplicant(fresh) > 0) await markChatReadByApplicant(bk.id);
         }
         renderPreservingChatScrollUnlessComposing();
       }
