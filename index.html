@@ -2761,9 +2761,19 @@ async function requestChatNotificationPermission(){
 // Shows a browser notification for an incoming chat message, unless the
 // person is already actively looking at that exact chat with the tab
 // focused (in which case they'll see it appear live anyway).
+//
+// currentlyOpenBookingId is optional. Admin has many possible
+// conversations, so it passes whichever chat modal (if any) is currently
+// open, to compare against. An applicant/tutor only ever has ONE possible
+// conversation — their own — so there's nothing meaningful to compare
+// against; the call site there omits this argument, and "already looking
+// at it" reduces to just "is the tab actually focused right now".
 function maybeShowChatNotification(senderName, messageText, bookingId, currentlyOpenBookingId){
   if(typeof Notification === 'undefined' || chatNotificationPermission !== 'granted' || !chatNotificationsEnabled) return;
-  const alreadyLookingAtIt = document.visibilityState === 'visible' && currentlyOpenBookingId === bookingId;
+  const tabActivelyFocused = document.visibilityState === 'visible' && document.hasFocus();
+  const alreadyLookingAtIt = currentlyOpenBookingId === undefined
+    ? tabActivelyFocused
+    : (tabActivelyFocused && currentlyOpenBookingId === bookingId);
   if(alreadyLookingAtIt) return;
   try{
     const notif = new Notification(senderName, { body: messageText || '📎 Sent a file', tag: 'chat-'+bookingId });
@@ -5633,7 +5643,7 @@ function attachHandlers(){
           const prevCount = chatKnownMessageCounts[bk.id] || 0;
           if(newMsgs.length > prevCount){
             newMsgs.slice(prevCount).forEach(m => {
-              if(m.from === 'admin') maybeShowChatNotification('Admin', m.text, bk.id, bk.id);
+              if(m.from === 'admin') maybeShowChatNotification('Admin', m.text, bk.id);
             });
           }
           chatKnownMessageCounts[bk.id] = newMsgs.length;
