@@ -7229,6 +7229,26 @@ Langdy Team`;
 /* ============================================================
    Init
    ============================================================ */
+// Re-checks the applicant/tutor's own chat read status whenever the tab
+// regains focus or becomes visible again — not just when a NEW Firestore
+// change happens to arrive. Without this, someone who opens the chat,
+// switches away, and comes back to READ an already-unread message (with no
+// further new message triggering the Firestore listener) would never get
+// marked as read, since the listener's callback only re-runs on actual
+// data changes, not on focus changes.
+async function checkAndMarkApplicantChatRead(){
+  if(view !== 'book' || !bk.done || !bk.id) return;
+  const fresh = bookings.find(b => b.id === bk.id);
+  if(!fresh) return;
+  const tabActivelyFocused = document.visibilityState === 'visible' && document.hasFocus();
+  if(tabActivelyFocused && unreadCountForApplicant(fresh) > 0){
+    await markChatReadByApplicant(bk.id);
+    render();
+  }
+}
+window.addEventListener('focus', checkAndMarkApplicantChatRead);
+document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
+
 (async function init(){
   const params = new URLSearchParams(window.location.search);
   if(params.has('apply')) view = 'apply';
