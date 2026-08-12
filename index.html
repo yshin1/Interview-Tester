@@ -10,6 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
 <style>
@@ -849,6 +850,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const fbStorage = firebase.storage();
+const fbFunctions = firebase.functions();
 const KV_COLLECTION = 'kv';
 
 // Admin gets its OWN persistent Firebase app/auth instance, completely
@@ -1011,6 +1013,41 @@ const MESSAGES_SUBCOLLECTION = 'messages';
 // booking creation, chat message, and admin edit was hitting that same
 // document. Splitting into one-doc-per-booking removes that contention
 // almost entirely (each booking's writes are now isolated).
+// Looks up a booking by email via a Cloud Function instead of a direct
+// Firestore query. Firestore security rules can't safely allow "query the
+// whole bookings collection by email" for unauthenticated visitors — that's
+// indistinguishable, rules-wise, from "read every booking" — so this one
+// specific lookup runs server-side with elevated (Admin SDK) access instead,
+// and returns only the single matching record.
+// Checks whether an email is free to book/sign up with, via a Cloud
+// Function — same reasoning as findBookingByEmail: an unauthenticated
+// visitor can't be allowed to query the whole bookings collection just to
+// answer "does this email already exist", so it's answered server-side.
+async function checkEmailAvailable(email){
+  const callable = fbFunctions.httpsCallable('checkEmailAvailable');
+  const result = await callable({ email });
+  return !!(result.data && result.data.available);
+}
+// Populates `slotCounts` — how many bookings exist per date/time — from a
+// Cloud Function that only ever returns aggregate numbers, never individual
+// booking records. This is what slotsUsed() reads from, so the calendar can
+// show "3 left" / "Full" for unauthenticated visitors without ever
+// exposing who booked what.
+let slotCounts = {};
+async function loadSlotAvailability(){
+  try{
+    const callable = fbFunctions.httpsCallable('getSlotAvailability');
+    const result = await callable({});
+    slotCounts = (result.data && result.data.counts) || {};
+  }catch(e){
+    console.error('loadSlotAvailability error:', e);
+  }
+}
+async function findBookingByEmail(email){
+  const callable = fbFunctions.httpsCallable('findBookingByEmail');
+  const result = await callable({ email });
+  return result.data && result.data.booking ? result.data.booking : null;
+}
 async function loadBookings(){
   try{
     const snap = await db.collection(BOOKINGS_COLLECTION).get();
@@ -1638,7 +1675,15 @@ function isDateClosed(dateStr){
   return config && config.closedDates && config.closedDates.includes(dateStr);
 }
 function slotsUsed(date, time){
-  return bookings.filter(b => b.date===date && b.time===time).length;
+  // Admin has the full bookings collection loaded locally (via
+  // loadBookings()/the real-time listener), so compute directly from that —
+  // it's already there and more precise. Applicants/tutors never load the
+  // full collection anymore (see the Cloud Functions notes above), so they
+  // read the aggregate counts fetched via getSlotAvailability() instead.
+  if(view === 'admin'){
+    return bookings.filter(b => b.date===date && b.time===time).length;
+  }
+  return slotCounts[date + '_' + time] || 0;
 }
 function dowOfDateStr(dateStr){
   const [y,m,d] = dateStr.split('-').map(Number);
@@ -1659,6 +1704,22 @@ function fmtDateLabel(dateStr){
   const [y,m,d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m-1, d);
   return `${MONTHS_SHORT[m-1]} ${d} (${DOW[dt.getDay()]})`;
+}
+// Used for booking IDs specifically — once Firestore rules stop allowing
+// public "list" queries on the bookings collection (only "get by exact ID"
+// stays open to non-admins), the ID itself becomes the only thing standing
+// between a random visitor and someone else's booking, so it needs to be
+// genuinely hard to guess, not just "probably unique". crypto.randomUUID()
+// gives 122 bits of randomness — Date.now() + a short Math.random() suffix
+// (the old scheme) does not.
+function generateSecureId(prefix){
+  if(typeof crypto !== 'undefined' && crypto.randomUUID) return prefix + '_' + crypto.randomUUID();
+  // Fallback for any environment without crypto.randomUUID — still far
+  // stronger than the old timestamp+short-suffix scheme.
+  const bytes = new Uint8Array(16);
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for(let i=0;i<16;i++) bytes[i] = Math.floor(Math.random()*256);
+  return prefix + '_' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -5088,7 +5149,7 @@ function attachHandlers(){
         const val = $('#gateCode').value.trim();
         if(!val){ gateError='Please enter a code.'; render(); return; }
         gateBusy = true; gateError=''; render();
-        await loadBookings();
+        await loadSlotAvailability();
         if(val === config.applicantCode){
           view='book'; gateBusy=false; render();
         } else {
@@ -5204,11 +5265,9 @@ function attachHandlers(){
         }
         s.busy = true; s.error = ''; render();
         try{
-          await loadBookings();
-          const emailNorm = email.toLowerCase();
-          const match = bookings.find(b => (b.email||'').trim().toLowerCase() === emailNorm && b.tutorAccountCreated);
+          const match = await findBookingByEmail(email);
           s.busy = false;
-          if(match){
+          if(match && match.tutorAccountCreated){
             await firebase.auth().sendPasswordResetEmail(email);
             s.success = "Reset link sent! Check your inbox (and spam folder).";
           } else {
@@ -5257,14 +5316,13 @@ function attachHandlers(){
         if(password !== passwordConfirm){
           d.error = 'Passwords do not match.'; render(); return;
         }
-        await loadBookings();
-        const emailNorm = email.toLowerCase();
-        if(bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
+        const existing = await findBookingByEmail(email);
+        if(existing){
           d.error = 'An account with this email already exists — try signing in instead.'; render(); return;
         }
 
         d.busy = true; d.error = ''; render();
-        const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const newId = generateSecureId('tutor');
         const newRecord = {
           id: newId, fullName, email, tutorName,
           // Chat display name is auto-set to the tutor name — this is the
@@ -5313,11 +5371,21 @@ function attachHandlers(){
         const email = $('#findEmailInput').value.trim();
         if(!email){ findError='Please enter your email.'; render(); return; }
         findBusy = true; findError=''; findEmail = email; render();
-        await loadBookings();
-        const match = bookings.find(b => b.email.trim().toLowerCase() === email.toLowerCase());
+        let match;
+        try{
+          match = await findBookingByEmail(email);
+        }catch(e){
+          console.error('findBookingByEmail error:', e);
+          findBusy=false; findError='Something went wrong looking that up. Please try again.'; render(); return;
+        }
         if(!match){
           findBusy=false; findError='No booking found for that email.'; render(); return;
         }
+        // Now that we know the exact ID, cache it locally so this session's
+        // ordinary get()/onSnapshot() calls on this one booking keep working
+        // under rules that only allow "get by known ID", not open listing.
+        const idx = bookings.findIndex(b => b.id === match.id);
+        if(idx !== -1) bookings[idx] = match; else bookings.push(match);
         bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
                agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
         findBusy=false; view='book'; render();
@@ -5368,15 +5436,14 @@ function attachHandlers(){
         while(attempt < MAX_ATTEMPTS && !success){
           attempt++;
           try{
-            await loadBookings();
-            const emailNorm = bk.email.trim().toLowerCase();
-            const dupEmail = bookings.some(b => b.email.trim().toLowerCase()===emailNorm && !isArchivedBooking(b));
-            if(dupEmail){
+            const emailAvailable = await checkEmailAvailable(bk.email.trim());
+            if(!emailAvailable){
               bk.busy=false; bk.error='This email address has already been used to book a slot. Only one booking is allowed per person.'; render(); return;
             }
             if(isDateClosed(bk.date)){
               bk.busy=false; bk.error='This date was just closed by the organizer. Please pick another date.'; bk.step=1; bk.date=null; bk.time=null; render(); return;
             }
+            await loadSlotAvailability();
             const used = slotsUsed(bk.date, bk.time);
             const cap = slotCapacityFor(bk.date, bk.time);
             if(used >= cap){
@@ -5384,7 +5451,7 @@ function attachHandlers(){
             }
             const welcomeAt = new Date().toISOString();
             newBooking = {
-              id: 'b_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+              id: generateSecureId('b'),
               fullName: bk.fullName.trim(),
               email: bk.email.trim(),
               date: bk.date,
@@ -5415,7 +5482,8 @@ function attachHandlers(){
               deviceBackupInternet: '',
               deviceNote: ''
             };
-            await saveBookings([...bookings, newBooking]);
+            const { id: newBookingId, ...newBookingData } = newBooking;
+            await db.collection(BOOKINGS_COLLECTION).doc(newBookingId).set(newBookingData);
             // The welcome message lives in the subcollection, same as every
             // other chat message — the booking doc only carries the
             // lastMessage* summary shown in list previews.
@@ -5425,8 +5493,12 @@ function attachHandlers(){
             // Verify the write actually stuck — the shared storage is "last write wins",
             // so if someone else wrote in the same instant, our booking (or theirs) could
             // have been silently clobbered. Re-read and confirm before declaring success.
-            await loadBookings();
-            const stillThere = bookings.some(b => b.id === newBooking.id);
+            // A direct get-by-ID (not a collection list) still works fine for an
+            // unauthenticated visitor under the tightened rules, since it's
+            // scoped to the one ID we just created.
+            const verifyDoc = await db.collection(BOOKINGS_COLLECTION).doc(newBookingId).get();
+            const stillThere = verifyDoc.exists;
+            await loadSlotAvailability();
             const countForSlot = slotsUsed(newBooking.date, newBooking.time);
             if(stillThere && countForSlot <= cap){
               success = true;
@@ -5442,6 +5514,7 @@ function attachHandlers(){
         }
         bk.busy=false;
         if(success){
+          if(!bookings.some(b => b.id === newBooking.id)) bookings.push(newBooking);
           bk.id = newBooking.id; bk.done=true; render();
         } else if(lastErrorWasNetwork){
           bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
@@ -6753,7 +6826,7 @@ Langdy Team`;
       // the minimal booking record, creates the Firebase account, and
       // returns the temp password (or throws with a friendly message).
       const createAndInviteExistingTutor = async (fullName, email) => {
-        const newId = 'tutor_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const newId = generateSecureId('tutor');
         const newRecord = {
           id: newId, fullName, email,
           date: null, time: null,
@@ -7182,13 +7255,13 @@ Langdy Team`;
       if(user){
         tutorLoginBusy = false;
         if(view !== 'apply' && view !== 'signupForm' && view !== 'deviceForm'){
-          await loadBookings();
-          const match = bookings.find(b => (b.email||'').trim().toLowerCase() === (user.email||'').trim().toLowerCase() && b.tutorAccountCreated === true);
-          if(match){
+          const match = await findBookingByEmail(user.email||'');
+          if(match && match.tutorAccountCreated === true){
             tutorLoginError = '';
             bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
                    agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
             view = 'book';
+            if(!bookings.some(b => b.id === match.id)) bookings.push(match);
           } else {
             tutorLoginError = "Signed in, but couldn't find a booking under this email. Please contact the admin.";
             gateMode = 'tutorLogin';
