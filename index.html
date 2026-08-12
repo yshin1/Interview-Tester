@@ -850,7 +850,10 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const fbStorage = firebase.storage();
-const fbFunctions = firebase.functions();
+// Must match the region the functions are actually deployed to
+// (asia-southeast1 — see functions/index.js) or calls fail trying to reach
+// the default us-central1 region where nothing is deployed.
+const fbFunctions = firebase.app().functions('asia-southeast1');
 const KV_COLLECTION = 'kv';
 
 // Admin gets its OWN persistent Firebase app/auth instance, completely
