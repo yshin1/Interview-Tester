@@ -2668,7 +2668,8 @@ function renderBookDone(){
         <div class="ticket-row"><span class="k">Email</span><span class="v" style="font-size:12.5px;">${escapeHtml(bk.email)}</span></div>
       </div>
       <h3 style="font-size:16px; font-weight:800; margin:26px 0 4px;">One last step: confirm your booking</h3>
-      <p style="font-size:13px; color:var(--slate); margin:0 0 12px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>`}
+      <p style="font-size:13px; color:var(--slate); margin:0 0 4px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>
+      <p style="font-size:13.5px; color:var(--danger); font-weight:700; margin:0 0 12px; line-height:1.6;">⚠️ Please start by typing your Full Name.</p>`}
 
       ${renderChatNotificationBanner()}
       ${renderChatPanel(bk.id, 'applicant')}
@@ -2706,8 +2707,7 @@ function renderBookDone(){
         <div class="icon">⏰</div>
         <div class="txt">If we do not receive a message from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled.</div>
       </div>
-      <p class="hint" style="margin-top:10px;">Want to come back to this chat later? Use "Already booked? Find your chat" on the main entry page — you'll just need the email you booked with.</p>
-      <button class="btn btn-ghost" style="margin-top:16px;" id="doneClose">Done</button>`}
+      <p class="hint" style="margin-top:10px;">Want to come back to this chat later? Use "Already booked? Find your chat" on the main entry page — you'll just need the email you booked with.</p>`}
     </div>
   </div>`;
 }
@@ -5436,6 +5436,20 @@ function attachHandlers(){
         if(!match){
           findBusy=false; findError='No booking found for that email.'; render(); return;
         }
+        if(match.tutorAccountCreated === true){
+          // Once someone becomes a tutor, their chat is only readable to
+          // admin or their own logged-in session — "Find your chat" is
+          // unauthenticated by design, so it can never work for them again
+          // past this point. Catch it here with a clear message, rather
+          // than letting them hit a bare permission error moments later
+          // when the chat thread tries (and fails) to load.
+          findBusy=false;
+          gateMode='tutorLogin';
+          tutorLoginEmail=email;
+          tutorLoginError='This email already has a tutor account — please sign in with your password below.';
+          render();
+          return;
+        }
         // Now that we know the exact ID, cache it locally so this session's
         // ordinary get()/onSnapshot() calls on this one booking keep working
         // under rules that only allow "get by known ID", not open listing.
@@ -5652,13 +5666,6 @@ function attachHandlers(){
         renderPreservingChatScrollUnlessComposing();
       }
     });
-    const doneClose = $('#doneClose');
-    if(doneClose) doneClose.onclick = () => {
-      stopChatPolling();
-      chatDraftText = '';
-      bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
-      render();
-    };
     const tutorNameInput = $('#tutorNameInput');
     if(tutorNameInput){
       tutorNameInput.oninput = e => { tutorNameEditState.value = e.target.value; };
