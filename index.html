@@ -5763,7 +5763,14 @@ function attachHandlers(){
       stopDevicePolling();
     }
 
-    if(adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='tutorList' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
+    // Kept running for the WHOLE admin session (any tab), not just the
+    // bookings-related ones — this is what powers new-message notification
+    // detection across the whole site, and stopping it just because admin
+    // is on, say, the Applications tab meant notifications silently never
+    // fired while browsing anywhere else. The render()-triggering condition
+    // inside the listener's own callback is still tab-specific, so this
+    // doesn't cause extra re-renders on tabs that don't show booking data.
+    if(view==='admin'){
       startBookingsPolling();
     } else {
       stopBookingsPolling();
