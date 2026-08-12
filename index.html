@@ -4865,7 +4865,7 @@ function attachHandlers(){
       // Admin and tutor now live on separate Firebase Auth instances, so
       // sign out of whichever one is actually active here.
       try{
-        if(currentAdminUser) await adminAuth.signOut();
+        if(currentAdminUser) await Promise.all([adminAuth.signOut(), firebase.auth().signOut()]);
         else await firebase.auth().signOut();
       }catch(e){ console.error('Sign out failed:', e); }
       return;
@@ -5178,6 +5178,23 @@ function attachHandlers(){
           render();
         }, 15000);
         try{
+          // Signs into BOTH the admin-scoped app (adminAuth, used for the
+          // isAdmin() gate on applications/signups/etc.) AND the default
+          // app (used by `db`, which bookings-related reads/writes go
+          // through). Firestore rules check request.auth on whichever app
+          // instance actually made the call — bookings' "list: if isAdmin()"
+          // rule was failing for admin because `db` (default app) had never
+          // been signed in, even though adminAuth had.
+          // Sign into the DEFAULT app FIRST and wait for it to fully land —
+          // `db` (used for bookings) lives on this app, and Firestore rules
+          // check request.auth at the moment each call is made. Signing
+          // into adminAuth second means its onAuthStateChanged (which
+          // triggers loading admin data, including the bookings listener)
+          // only fires once the default app is already authenticated —
+          // doing both in parallel raced adminAuth's callback against the
+          // default app's sign-in still being in flight, and the bookings
+          // listener could get set up a beat too early with no auth yet.
+          await firebase.auth().signInWithEmailAndPassword(email, password);
           await adminAuth.signInWithEmailAndPassword(email, password);
           clearTimeout(signInTimeoutId);
           if(timedOut) return;
