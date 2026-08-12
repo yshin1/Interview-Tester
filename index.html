@@ -1393,6 +1393,40 @@ async function sendGuidelineMessagesWithDelay(bookingId, dateLabel, time){
 let chatPollBookingId = null;
 let chatMessagesUnsubscribe = null;
 let chatDocUnsubscribe = null;
+// One-time, lazy migration for bookings created BEFORE the switch to a
+// messages subcollection — their real chat history still lives in an
+// embedded `messages` array field on the booking document itself, which the
+// subcollection listener below has no way to see (it only reads documents
+// actually inside the subcollection, which is empty for these). Copies that
+// array into the subcollection as real message documents, then removes the
+// stale field so this only ever runs once per booking. Runs before the
+// subcollection listener attaches, so it never observes a false "empty"
+// state for one of these bookings.
+async function migrateLegacyMessagesIfNeeded(bookingId){
+  try{
+    const bookingRef = db.collection(BOOKINGS_COLLECTION).doc(bookingId);
+    const doc = await bookingRef.get();
+    if(!doc.exists) return;
+    const legacyMessages = doc.data().messages;
+    if(!Array.isArray(legacyMessages) || legacyMessages.length === 0) return;
+    const subSnap = await bookingRef.collection(MESSAGES_SUBCOLLECTION).limit(1).get();
+    if(!subSnap.empty){
+      // Subcollection already has real data (migration already happened, or
+      // new messages arrived since) — just clear the stale field so this
+      // check doesn't keep re-running for this booking.
+      await bookingRef.update({ messages: firebase.firestore.FieldValue.delete() });
+      return;
+    }
+    const batch = db.batch();
+    legacyMessages.forEach(m => {
+      batch.set(bookingRef.collection(MESSAGES_SUBCOLLECTION).doc(), m);
+    });
+    batch.update(bookingRef, { messages: firebase.firestore.FieldValue.delete() });
+    await batch.commit();
+  }catch(e){
+    console.error('Legacy message migration failed for booking', bookingId, e);
+  }
+}
 // Two listeners run together while a chat is open: one on the messages
 // subcollection (for the thread itself), and one on the parent booking
 // document (for lastReadByAdmin/lastReadByApplicant and anything else
@@ -1417,16 +1451,22 @@ function startChatPolling(bookingId, onTick){
     onTick();
   }, err => console.error('Chat doc listener error:', err));
 
-  chatMessagesUnsubscribe = bookingRef.collection(MESSAGES_SUBCOLLECTION).orderBy('at', 'asc').onSnapshot(snap => {
-    const messages = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-    const idx = bookings.findIndex(b => b.id === bookingId);
-    if(idx !== -1){
-      bookings[idx] = Object.assign({}, bookings[idx], { messages });
-    } else {
-      bookings.push({ id: bookingId, messages });
-    }
-    onTick();
-  }, err => console.error('Chat messages listener error:', err));
+  migrateLegacyMessagesIfNeeded(bookingId).finally(() => {
+    // If the person already navigated away from this chat before the
+    // migration check finished, don't attach a listener for a thread
+    // that's no longer being viewed.
+    if(chatPollBookingId !== bookingId) return;
+    chatMessagesUnsubscribe = bookingRef.collection(MESSAGES_SUBCOLLECTION).orderBy('at', 'asc').onSnapshot(snap => {
+      const messages = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
+      const idx = bookings.findIndex(b => b.id === bookingId);
+      if(idx !== -1){
+        bookings[idx] = Object.assign({}, bookings[idx], { messages });
+      } else {
+        bookings.push({ id: bookingId, messages });
+      }
+      onTick();
+    }, err => console.error('Chat messages listener error:', err));
+  });
 }
 function stopChatPolling(){
   if(chatDocUnsubscribe) chatDocUnsubscribe();
