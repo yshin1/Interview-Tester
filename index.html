@@ -2778,7 +2778,12 @@ function maybeShowChatNotification(senderName, messageText, bookingId, currently
     : (tabActivelyFocused && currentlyOpenBookingId === bookingId);
   if(alreadyLookingAtIt) return;
   try{
-    const notif = new Notification(senderName, { body: messageText || '📎 Sent a file', tag: 'chat-'+bookingId });
+    // The tag includes a timestamp so every notification is treated as
+    // genuinely new — a fixed tag like just 'chat-'+bookingId meant a
+    // SECOND message in the same conversation could get silently coalesced
+    // into the first (no fresh popup, sometimes no popup at all) instead of
+    // showing on its own.
+    const notif = new Notification(senderName, { body: messageText || '📎 Sent a file', tag: 'chat-'+bookingId+'-'+Date.now() });
     notif.onclick = () => { window.focus(); notif.close(); };
   }catch(e){
     console.error('Failed to show notification:', e);
