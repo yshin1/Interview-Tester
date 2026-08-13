@@ -2575,6 +2575,7 @@ function renderStepDate(){
   </div>
   <div class="date-grid-week">${cells}</div>
   <p class="hint" style="margin-top:10px;">Grayed-out days are not open for booking.</p>
+  ${bk.error ? `<div class="error-text">${escapeHtml(bk.error)}</div>` : ''}
   <div style="margin-top:24px; display:flex; justify-content:flex-end;">
     <button class="btn btn-gold" style="width:auto; padding:12px 28px;" id="dateNext" ${bk.date?'':'disabled'}>Next</button>
   </div>`;
@@ -2601,6 +2602,7 @@ function renderStepTime(){
   <div class="slot-grid">${morning.map(slotBtn).join('')}</div>
   <div class="slot-section-label">PM · PH time</div>
   <div class="slot-grid">${afternoon.map(slotBtn).join('')}</div>
+  ${bk.error ? `<div class="error-text">${escapeHtml(bk.error)}</div>` : ''}
   <div style="margin-top:24px; display:flex; justify-content:space-between;">
     <button class="btn btn-ghost" style="width:auto; padding:12px 20px;" id="timeBack">Back</button>
     <button class="btn btn-gold" style="width:auto; padding:12px 28px;" id="timeNext" ${bk.time?'':'disabled'}>Next</button>
@@ -5471,7 +5473,7 @@ function attachHandlers(){
   if(view==='book' && !bk.done){
     if(bk.step===1){
       $$('.date-btn[data-clickable="1"]').forEach(el=>{
-        el.onclick = () => { bk.date = el.dataset.date; render(); };
+        el.onclick = () => { bk.date = el.dataset.date; bk.error=''; render(); };
       });
       const next = $('#dateNext');
       if(next) next.onclick = () => { bk.step=2; render(); };
@@ -5482,7 +5484,7 @@ function attachHandlers(){
     }
     if(bk.step===2){
       $$('.slot-btn[data-clickable="1"]').forEach(el=>{
-        el.onclick = () => { bk.time = el.dataset.time; render(); };
+        el.onclick = () => { bk.time = el.dataset.time; bk.error=''; render(); };
       });
       $('#timeBack').onclick = () => { bk.step=1; render(); };
       const next = $('#timeNext');
@@ -5497,98 +5499,54 @@ function attachHandlers(){
       const submit = $('#infoSubmit');
       if(submit) submit.onclick = async () => {
         bk.error=''; bk.busy=true; render();
-        const MAX_ATTEMPTS = 5;
+        // The whole "check duplicate email, check capacity, write, verify"
+        // sequence now happens as one atomic transaction server-side (see
+        // createBooking in functions/index.js) — this closes the small gap
+        // that used to exist between checking a slot was free and actually
+        // writing to it, where two people booking at nearly the same
+        // instant could theoretically both slip through. A couple of
+        // retries here are still worth keeping for genuinely transient
+        // network hiccups reaching the function at all, separate from that.
+        const MAX_ATTEMPTS = 3;
         let attempt = 0;
-        let success = false;
-        let newBooking = null;
-        let lastErrorWasNetwork = false;
-        while(attempt < MAX_ATTEMPTS && !success){
+        let result = null;
+        let lastError = null;
+        while(attempt < MAX_ATTEMPTS && !result){
           attempt++;
           try{
-            const emailAvailable = await checkEmailAvailable(bk.email.trim());
-            if(!emailAvailable){
-              bk.busy=false; bk.error='This email address has already been used to book a slot. Only one booking is allowed per person.'; render(); return;
-            }
-            if(isDateClosed(bk.date)){
-              bk.busy=false; bk.error='This date was just closed by the organizer. Please pick another date.'; bk.step=1; bk.date=null; bk.time=null; render(); return;
-            }
-            await loadSlotAvailability();
-            const used = slotsUsed(bk.date, bk.time);
-            const cap = slotCapacityFor(bk.date, bk.time);
-            if(used >= cap){
-              bk.busy=false; bk.error='Sorry, another applicant just booked this time. Please choose another slot.'; bk.step=2; bk.time=null; render(); return;
-            }
-            const welcomeAt = new Date().toISOString();
-            newBooking = {
-              id: generateSecureId('b'),
+            const callable = fbFunctions.httpsCallable('createBooking');
+            const response = await callable({
               fullName: bk.fullName.trim(),
               email: bk.email.trim(),
               date: bk.date,
-              time: bk.time,
-              bookedAt: new Date().toISOString(),
-              lastMessageText: 'Please start by sending your Full Name!',
-              lastMessageAt: welcomeAt,
-              lastMessageFrom: 'system',
-              guidelineSent: false,
-              lastReadByAdmin: null,
-              unreadCountForAdmin: 0,
-              unreadCountForApplicant: 0,
-              viewedByAdmin: false,
-              assignedTo: defaultAssigneeFor(bk.date, bk.time),
-              onboardingStatus: '',
-              onboardingDate: '',
-              onboardingTime: '',
-              signupStatus: '',
-              regulationTestStatus: '',
-              trainingSessionStatus: '',
-              trainingSessionDate: '',
-              trainingSessionTime: '13:00',
-              schedulingDate: '',
-              schedulingTime: '',
-              schedulingStatus: '',
-              deviceFormStatus: '',
-              deviceBackupPower: '',
-              deviceBackupInternet: '',
-              deviceNote: ''
-            };
-            const { id: newBookingId, ...newBookingData } = newBooking;
-            await db.collection(BOOKINGS_COLLECTION).doc(newBookingId).set(newBookingData);
-            // The welcome message lives in the subcollection, same as every
-            // other chat message — the booking doc only carries the
-            // lastMessage* summary shown in list previews.
-            await db.collection(BOOKINGS_COLLECTION).doc(newBooking.id).collection(MESSAGES_SUBCOLLECTION).add({
-              from: 'system', text: 'Please start by sending your Full Name!', at: welcomeAt
+              time: bk.time
             });
-            // Verify the write actually stuck — the shared storage is "last write wins",
-            // so if someone else wrote in the same instant, our booking (or theirs) could
-            // have been silently clobbered. Re-read and confirm before declaring success.
-            // A direct get-by-ID (not a collection list) still works fine for an
-            // unauthenticated visitor under the tightened rules, since it's
-            // scoped to the one ID we just created.
-            const verifyDoc = await db.collection(BOOKINGS_COLLECTION).doc(newBookingId).get();
-            const stillThere = verifyDoc.exists;
-            await loadSlotAvailability();
-            const countForSlot = slotsUsed(newBooking.date, newBooking.time);
-            if(stillThere && countForSlot <= cap){
-              success = true;
-            }
-            lastErrorWasNetwork = false;
-            // otherwise loop and retry from a fresh read
+            result = response.data && response.data.booking;
           }catch(e){
-            // A transient network/server hiccup — don't give up immediately,
-            // wait a beat and retry rather than erroring on the first blip.
-            lastErrorWasNetwork = true;
+            lastError = e;
+            // A genuine rejection (duplicate email, slot full, date closed)
+            // — no point retrying the exact same request.
+            if(e.code && e.code !== 'internal' && e.code !== 'unavailable' && e.code !== 'deadline-exceeded'){
+              break;
+            }
             await new Promise(r => setTimeout(r, 700));
           }
         }
         bk.busy=false;
-        if(success){
-          if(!bookings.some(b => b.id === newBooking.id)) bookings.push(newBooking);
-          bk.id = newBooking.id; bk.done=true; render();
-        } else if(lastErrorWasNetwork){
-          bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
+        if(result){
+          if(!bookings.some(b => b.id === result.id)) bookings.push(result);
+          bk.id = result.id; bk.done=true; render();
+          return;
+        }
+        const code = lastError && lastError.code;
+        if(code === 'already-exists'){
+          bk.error='This email address has already been used to book a slot. Only one booking is allowed per person.'; render();
+        } else if(code === 'resource-exhausted'){
+          bk.error='Sorry, another applicant just booked this time. Please choose another slot.'; bk.step=2; bk.time=null; render();
+        } else if(code === 'failed-precondition'){
+          bk.error='This date was just closed by the organizer. Please pick another date.'; bk.step=1; bk.date=null; bk.time=null; render();
         } else {
-          bk.error='This slot filled up right as you were booking. Please choose another time.'; bk.step=2; bk.time=null; render();
+          bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
         }
       };
     }
