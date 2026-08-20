@@ -1749,6 +1749,25 @@ function generateSecureId(prefix){
   else for(let i=0;i<16;i++) bytes[i] = Math.floor(Math.random()*256);
   return prefix + '_' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
 }
+// Remembers a still-applicant's (not-yet-a-tutor) booking ID in THIS
+// browser, so they don't have to retype their email every visit — purely a
+// same-device convenience, not a new access grant. The booking ID is
+// already the key that makes "get my own booking" work under the Firestore
+// rules (get-by-exact-ID stays open to anyone), so storing it locally just
+// saves re-entering the email that would otherwise be used to look that ID
+// up again via findBookingByEmail. Deliberately NOT used for tutor-stage
+// bookings — those already get real, persistent sign-in via Firebase Auth,
+// so there's nothing extra to remember here for them.
+const APPLICANT_BOOKING_STORAGE_KEY = 'langdy_my_booking_id';
+function rememberMyBooking(bookingId){
+  try{ localStorage.setItem(APPLICANT_BOOKING_STORAGE_KEY, bookingId); }catch(e){ /* ignore — best-effort only */ }
+}
+function forgetMyBooking(){
+  try{ localStorage.removeItem(APPLICANT_BOOKING_STORAGE_KEY); }catch(e){ /* ignore */ }
+}
+function getRememberedBookingId(){
+  try{ return localStorage.getItem(APPLICANT_BOOKING_STORAGE_KEY); }catch(e){ return null; }
+}
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -2709,7 +2728,7 @@ function renderBookDone(){
         <div class="icon">⏰</div>
         <div class="txt">If we do not receive a message from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled.</div>
       </div>
-      <p class="hint" style="margin-top:10px;">Want to come back to this chat later? Use "Already booked? Find your chat" on the main entry page — you'll just need the email you booked with.</p>`}
+      <p class="hint" style="margin-top:10px;">This browser will remember your chat automatically next time — no need to re-enter your email on this device. <button class="link-btn" id="notMeLink" style="font-size:12px; padding:0; text-decoration:underline;">Not you, or using a shared computer?</button></p>`}
     </div>
   </div>`;
 }
@@ -5464,6 +5483,7 @@ function attachHandlers(){
         if(idx !== -1) bookings[idx] = match; else bookings.push(match);
         bk = { step:3, date:match.date, time:match.time, fullName:match.fullName, email:match.email,
                agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
+        rememberMyBooking(match.id);
         findBusy=false; view='book'; render();
       };
       $('#findSubmit').onclick = submit;
@@ -5540,7 +5560,7 @@ function attachHandlers(){
         bk.busy=false;
         if(result){
           if(!bookings.some(b => b.id === result.id)) bookings.push(result);
-          bk.id = result.id; bk.done=true; render();
+          bk.id = result.id; bk.done=true; rememberMyBooking(result.id); render();
           return;
         }
         const code = lastError && lastError.code;
@@ -5636,6 +5656,15 @@ function attachHandlers(){
         renderPreservingChatScrollUnlessComposing();
       }
     });
+    const notMeLink = $('#notMeLink');
+    if(notMeLink) notMeLink.onclick = () => {
+      forgetMyBooking();
+      stopChatPolling();
+      chatDraftText = '';
+      bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
+      view = 'gate'; gateMode = 'code';
+      render();
+    };
     const tutorNameInput = $('#tutorNameInput');
     if(tutorNameInput){
       tutorNameInput.oninput = e => { tutorNameEditState.value = e.target.value; };
@@ -7222,6 +7251,39 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
   else if(params.has('tutor-signup')){ gateMode = 'tutorSignup'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
+  // If this browser has a remembered still-applicant booking (from a
+  // previous visit), skip straight back to their chat instead of showing
+  // the access-code screen — same convenience "Find your chat" already
+  // gave them, just without needing to retype the email every time. Only
+  // applies on a plain visit (view is still 'gate' — no ?apply/?admin/
+  // ?tutor/etc link brought them here for something else).
+  if(view === 'gate'){
+    const rememberedId = getRememberedBookingId();
+    if(rememberedId){
+      try{
+        const doc = await db.collection(BOOKINGS_COLLECTION).doc(rememberedId).get();
+        if(doc.exists){
+          const data = Object.assign({ id: doc.id }, doc.data());
+          if(data.tutorAccountCreated === true){
+            // They've since become a tutor — this shortcut no longer
+            // applies to them (tutor-stage bookings require real sign-in),
+            // so clear it and let them use Tutor Sign In properly instead.
+            forgetMyBooking();
+          } else {
+            bookings.push(data);
+            bk = { step:3, date:data.date, time:data.time, fullName:data.fullName, email:data.email,
+                   agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: data.id };
+            view = 'book';
+          }
+        } else {
+          forgetMyBooking(); // booking no longer exists (cancelled/deleted) — nothing to restore
+        }
+      }catch(e){
+        console.error('Failed to restore remembered booking:', e);
+      }
+    }
+  }
+
   // Admin and tutor now each get their own Firebase Auth instance (see
   // adminAuth above), so their sign-in states can't interfere with each
   // other — signing into one no longer bounces the other back to its login
@@ -7343,4 +7405,4 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
 })();
 </script>
 </body>
-</html>
+</html>ㅍ
