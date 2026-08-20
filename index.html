@@ -327,6 +327,59 @@
     table.list-table{ font-size:12px; }
     .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
   }
+
+  /* ---------- phone-sized screens: applicant/tutor booking + chat ----------
+     A narrower, more deliberate breakpoint than the 600px one above, tuned
+     for the screens an applicant or tutor actually uses on their own phone
+     (gate/access-code entry, date/time picking, the confirmation ticket,
+     and the chat thread) rather than the admin console, which stays
+     desktop-oriented for now. */
+  @media (max-width:480px){
+    .center-screen{ padding:16px 14px; }
+    .gate-card{ max-width:100%; }
+    .card{ padding:18px 16px; border-radius:12px; }
+    .gate-title{ font-size:19px; }
+    .gate-sub{ font-size:13px; }
+    .step-heading{ font-size:17px; margin-bottom:16px; }
+    .step-label{ font-size:11.5px; }
+    .brand-sub{ display:none; } /* topbar subtitle drops on very narrow screens to save space */
+    .topbar .brand-name{ font-size:14.5px; }
+    .topbar .right{ font-size:12px; gap:8px; }
+
+    /* Every text input/select/textarea bumps to 16px here — below that,
+       iOS Safari auto-zooms the whole page the moment the field is
+       focused, which is a well-known, jarring mobile annoyance. This
+       override only applies at this breakpoint so desktop sizing is
+       untouched. */
+    input[type=text], input[type=email], input[type=password], input[type=number],
+    textarea, select, .chat-input-row input{ font-size:16px; }
+
+    .date-grid-week{ gap:5px; }
+    .week-cell{ padding:8px 2px; }
+    .week-cell .dnum{ font-size:12px; }
+    .week-cell .dow{ font-size:9px; }
+    .week-cell .avail{ font-size:8px; }
+
+    .slot-grid{ grid-template-columns:repeat(2,1fr); gap:8px; }
+    .slot-btn{ font-size:13.5px; padding:11px 6px; }
+
+    .ticket{ padding:18px; }
+    .ticket-name{ font-size:19px; }
+    .ticket-row{ font-size:13px; }
+
+    .warn-box{ padding:14px; gap:9px; }
+    .warn-box .txt{ font-size:13.5px; }
+    .warn-box.strong .txt{ font-size:14px; }
+
+    /* Taller phones have plenty of vertical room — let the thread use more
+       of it (min() keeps it from ever exceeding the desktop cap) instead
+       of leaving a fixed, comparatively small 420px box with dead space
+       around it. */
+    .chat-thread{ max-height:min(420px, 52vh); padding:10px; }
+    .chat-bubble{ max-width:86%; font-size:13px; }
+    .chat-input-row{ padding:8px; gap:6px; }
+    .chat-input-row button{ padding:10px 14px; }
+  }
 </style>
 </head>
 <body>
@@ -7405,4 +7458,4 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
 })();
 </script>
 </body>
-</html>ㅍ
+</html>
