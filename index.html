@@ -830,9 +830,7 @@ const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct
 const WEEKDAY_NUMS = [1,2,3,4,5]; // Mon..Fri (matches Date.getDay())
 function freshDayCapacity(){ return Object.fromEntries(SLOTS.map(s => [s.time, 1])); }
 const DEFAULT_CONFIG = {
-  applicantCode: 'WELCOME2026',
   adminCode: 'ADMIN0000',
-  existingTutorCode: 'TUTOR2026',
   slotCapacity: Object.fromEntries(WEEKDAY_NUMS.map(d => [d, freshDayCapacity()])),
   closedDates: []
 };
@@ -920,6 +918,21 @@ let chatTarget = null;       // booking whose chat modal is open (admin side)
 let chatAdminReadCutoffAtOpen = null;
 let editDate = null, editTime = null, editError = '';
 let codeChangeState = { newApplicant:'', newExistingTutor:'', error:'', success:'', busy:false };
+let tutorSignupCodeAdmin = null; // loaded on-demand for admin's Settings > Codes view; null until loaded
+let applicantCodeAdmin = null; // same, for the applicant/1st-demo code
+let verifiedApplicantCode = ''; // the code the gate screen confirmed valid — threaded through to createBooking
+let tutorInvites = []; // per-tutor single-use sign-up invites, loaded on-demand for Settings > Codes
+let codesTutorInvitesLoaded = false;
+let tutorInviteDraft = { fullName: '', email: '', busy: false, error: '' };
+async function loadTutorInvites(){
+  try{
+    const snap = await db.collection('tutorInvites').get();
+    tutorInvites = snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
+      .sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
+  }catch(e){
+    console.error('Failed to load tutor invites:', e);
+  }
+}
 let capacityDraft = null;
 let capacityDayTab = 1; // 1=Mon .. 5=Fri
 let capacitySaving = false;
@@ -1073,7 +1086,6 @@ async function loadConfig(){
       parsed.slotCapacity = merged;
       parsed.closedDates = parsed.closedDates || [];
       if(!parsed.adminCode) parsed.adminCode = DEFAULT_CONFIG.adminCode; // safety net if an in-progress login-based config was saved
-      if(!parsed.existingTutorCode) parsed.existingTutorCode = DEFAULT_CONFIG.existingTutorCode; // safety net for configs saved before this code existed
       config = parsed;
     } else {
       config = DEFAULT_CONFIG;
@@ -1146,6 +1158,44 @@ async function findBookingByEmail(email){
   const callable = fbFunctions.httpsCallable('findBookingByEmail');
   const result = await callable({ email });
   return result.data && result.data.booking ? result.data.booking : null;
+}
+// Verifies the tutor sign-up access code server-side (see verifyTutorSignupCode
+// in functions/index.js) — the real code value is never sent to or readable
+// by the client, only a pass/fail.
+async function verifyTutorSignupCode(code){
+  const callable = fbFunctions.httpsCallable('verifyTutorSignupCode');
+  const result = await callable({ code });
+  return !!(result.data && result.data.valid);
+}
+// Admin-only: loads the actual current sign-up code for display/editing in
+// Settings. Reads adminSecrets/tutorSignup directly (allowed only for admin
+// per firestore.rules) rather than through a Cloud Function, since here —
+// unlike verifyTutorSignupCode — the caller is already authenticated as
+// admin and is SUPPOSED to see the real value.
+// Verifies the applicant/1st-demo access code server-side — same pattern
+// as verifyTutorSignupCode, real value never sent to the client.
+async function verifyApplicantCode(code){
+  const callable = fbFunctions.httpsCallable('verifyApplicantCode');
+  const result = await callable({ code });
+  return !!(result.data && result.data.valid);
+}
+async function loadApplicantCodeForAdmin(){
+  try{
+    const snap = await db.collection('adminSecrets').doc('applicantCode').get();
+    applicantCodeAdmin = snap.exists ? (snap.data().code || '') : 'WELCOME2026';
+  }catch(e){
+    console.error('Failed to load applicant code:', e);
+    applicantCodeAdmin = null;
+  }
+}
+async function loadTutorSignupCodeForAdmin(){
+  try{
+    const snap = await db.collection('adminSecrets').doc('tutorSignup').get();
+    tutorSignupCodeAdmin = snap.exists ? (snap.data().code || '') : 'TUTOR2026';
+  }catch(e){
+    console.error('Failed to load tutor sign-up code:', e);
+    tutorSignupCodeAdmin = null;
+  }
 }
 async function loadBookings(){
   try{
@@ -1865,6 +1915,18 @@ function generateSecureId(prefix){
   else for(let i=0;i<16;i++) bytes[i] = Math.floor(Math.random()*256);
   return prefix + '_' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
 }
+// Short, human-typable single-use invite codes (8 chars) — distinct from
+// generateSecureId above, which makes long UUIDs meant for document IDs,
+// not something a person copy-pastes out of an email into a form. Excludes
+// visually ambiguous characters (0/O, 1/I/L) since people do sometimes
+// retype these by hand instead of pasting.
+function generateInviteCode(){
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint8Array(8);
+  if(typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for(let i=0;i<8;i++) bytes[i] = Math.floor(Math.random()*256);
+  return Array.from(bytes).map(b => chars[b % chars.length]).join('');
+}
 // Remembers a still-applicant's (not-yet-a-tutor) booking ID in THIS
 // browser, so they don't have to retype their email every visit — purely a
 // same-device convenience, not a new access grant. The booking ID is
@@ -2300,7 +2362,6 @@ function renderGate(){
         <button class="btn btn-primary" id="tutorLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
         ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
         <button class="find-link" id="gateSwitchToForgotPassword" style="display:block; margin-top:14px;">Forgot your password?</button>
-        <button class="find-link" id="gateSwitchToTutorSignupFromLogin" style="display:block; margin-top:8px;">New tutor? Create your account →</button>
         <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:8px;">← Back to access code</button>
       </div>
     </div>`;
@@ -3444,6 +3505,7 @@ let reapplicationHistoryTarget = null;
 let deleteApplicationTarget = null;
 let deleteTutorChatTarget = null;
 let selectedApplicationIds = new Set();
+let bulkInviteResultText = ''; // name/email/code list shown after "Send Invite to Selected" — each person gets their own code now
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
@@ -3497,6 +3559,13 @@ function renderAdminApplications(){
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
+    ${bulkInviteResultText ? `
+    <div class="card" style="background:var(--paper-2); margin-bottom:16px;">
+      <div class="section-title" style="font-size:13.5px;">Invite codes generated — copy into your own email/BCC tool</div>
+      <div class="section-desc">Each person needs their own code below (single combined emails can't carry a different code per recipient).</div>
+      <textarea id="bulkInviteResultBox" readonly style="width:100%; min-height:120px; font-family:monospace; font-size:12.5px; padding:10px; border:1.5px solid var(--line); border-radius:8px;">${escapeHtml(bulkInviteResultText)}</textarea>
+      <button class="btn btn-ghost btn-sm" id="bulkInviteResultCloseBtn" style="width:auto; margin-top:8px;">Dismiss</button>
+    </div>` : ''}
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -5033,14 +5102,17 @@ function renderAdminAccountSection(){
 
 function renderAdminCodes(){
   const s = codeChangeState;
+  const d = tutorInviteDraft;
+  const pendingInvites = tutorInvites.filter(t => !t.used);
+  const usedInvites = tutorInvites.filter(t => t.used);
   return `
   ${renderAdminAccountSection()}
   <div class="card">
-    <div class="section-title">Applicant Access Code</div>
-    <div class="section-desc">This is the shared code tutors use to book an interview slot. It isn't a login and doesn't need to be secret in the same way — anyone with the link and code can book.</div>
+    <div class="section-title">Applicant Access Code (admin testing)</div>
+    <div class="section-desc">A reusable fallback code, mainly for admin's own testing — real invites go out per-person now with their own single-use code, from the <strong>Applications</strong> tab's Invite button. Admin-only, not readable from the public config.</div>
 
     <div class="field">
-      <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.applicantCode)})</span></label>
+      <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${applicantCodeAdmin==null?'loading…':escapeHtml(applicantCodeAdmin)})</span></label>
       <input type="text" id="newApplicantInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newApplicant)}">
     </div>
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
@@ -5048,14 +5120,45 @@ function renderAdminCodes(){
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
   </div>
   <div class="card">
-    <div class="section-title">Existing Tutor Sign-Up Code</div>
-    <div class="section-desc">Share this link + code privately with already-hired tutors so they can create their own chat login without going through the apply/demo pipeline: <strong>${escapeHtml(window.location.origin + window.location.pathname)}?tutor-signup</strong></div>
+    <div class="section-title">Existing Tutor Sign-Up Code (admin testing)</div>
+    <div class="section-desc">A reusable fallback code for admin's own testing of the sign-up flow. Real tutor invites should use the per-person codes below instead — this always works but isn't tied to anyone specific.</div>
 
     <div class="field">
-      <label>New Sign-Up Code <span style="color:var(--slate-light); font-weight:400;">(current: ${escapeHtml(config.existingTutorCode)})</span></label>
+      <label>New Sign-Up Code <span style="color:var(--slate-light); font-weight:400;">(current: ${tutorSignupCodeAdmin==null?'loading…':escapeHtml(tutorSignupCodeAdmin)})</span></label>
       <input type="text" id="newExistingTutorCodeInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newExistingTutor)}">
     </div>
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="tutorCodeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
+  </div>
+  <div class="card">
+    <div class="section-title">Tutor Sign-Up Invites</div>
+    <div class="section-desc">Generates a single-use code for one specific tutor. Share it (plus <strong>${escapeHtml(window.location.origin + window.location.pathname)}?tutor-signup</strong>) with just that person — it stops working the moment their account is created, and won't work for anyone else.</div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px;">
+      <div class="field" style="margin:0; flex:1; min-width:160px;">
+        <label>Tutor's Name</label>
+        <input type="text" id="tutorInviteNameInput" placeholder="e.g. Amy" value="${escapeHtml(d.fullName)}" ${d.busy?'disabled':''}>
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:200px;">
+        <label>Email</label>
+        <input type="email" id="tutorInviteEmailInput" placeholder="tutor@example.com" value="${escapeHtml(d.email)}" ${d.busy?'disabled':''}>
+      </div>
+      <button class="btn btn-primary" style="width:auto; padding:11px 22px;" id="tutorInviteGenerateBtn" ${d.busy?'disabled':''}>${d.busy?'Generating…':'Generate & Email'}</button>
+    </div>
+    ${d.error ? `<div class="error-text">${escapeHtml(d.error)}</div>` : ''}
+
+    ${pendingInvites.length ? `
+    <div class="section-title" style="font-size:13px; margin-top:18px;">Pending (${pendingInvites.length})</div>
+    <table class="list-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Code</th><th></th></tr></thead>
+      <tbody>${pendingInvites.map(t => `
+      <tr>
+        <td>${escapeHtml(t.fullName||'—')}</td>
+        <td>${escapeHtml(t.email)}</td>
+        <td><code>${escapeHtml(t.code)}</code></td>
+        <td><button class="btn btn-ghost btn-sm" data-delete-tutor-invite="${t.id}" style="width:auto; padding:6px 12px; color:var(--danger);">Revoke</button></td>
+      </tr>`).join('')}</tbody>
+    </table>` : ''}
+    ${usedInvites.length ? `<div class="section-desc" style="margin-top:14px;">${usedInvites.length} invite${usedInvites.length===1?'':'s'} already used.</div>` : ''}
   </div>`;
 }
 
@@ -5466,7 +5569,8 @@ function attachHandlers(){
         if(!val){ gateError='Please enter a code.'; render(); return; }
         gateBusy = true; gateError=''; render();
         await loadSlotAvailability();
-        if(val === config.applicantCode){
+        if(await verifyApplicantCode(val)){
+          verifiedApplicantCode = val;
           view='book'; gateBusy=false; render();
         } else {
           gateBusy=false; gateError='That code is not valid.'; render();
@@ -5584,13 +5688,6 @@ function attachHandlers(){
       (tutorLoginEmail ? $('#tutorLoginPasswordInput') : $('#tutorLoginEmailInput')).focus();
       const tutorBackLink = $('#gateSwitchToCodeFromTutor');
       if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; cameFromTutorLink=false; render(); };
-      const toSignupLink = $('#gateSwitchToTutorSignupFromLogin');
-      if(toSignupLink) toSignupLink.onclick = () => {
-        tutorSignupDraft = Object.assign({}, tutorSignupDraft, { error: '' });
-        gateMode = 'tutorSignup';
-        cameFromTutorLink = true;
-        render();
-      };
       const forgotLink = $('#gateSwitchToForgotPassword');
       if(forgotLink) forgotLink.onclick = () => {
         tutorForgotPasswordState = { email: tutorLoginEmail, error: '', success: '', busy: false };
@@ -5640,9 +5737,6 @@ function attachHandlers(){
         const passwordConfirm = $('#tutorSignupPasswordConfirmInput').value;
         d.code = code; d.fullName = fullName; d.tutorName = tutorName; d.email = email;
 
-        if(code !== config.existingTutorCode){
-          d.error = 'That access code is not valid.'; render(); return;
-        }
         if(!fullName){
           d.error = 'Please enter your full name.'; render(); return;
         }
@@ -5658,44 +5752,25 @@ function attachHandlers(){
         if(password !== passwordConfirm){
           d.error = 'Passwords do not match.'; render(); return;
         }
-        const existing = await findBookingByEmail(email);
-        if(existing){
-          d.error = 'An account with this email already exists — try signing in instead.'; render(); return;
-        }
 
         d.busy = true; d.error = ''; render();
-        const newId = generateSecureId('tutor');
-        const newRecord = {
-          id: newId, fullName, email, tutorName,
-          // Chat display name is auto-set to the tutor name — this is the
-          // same field the admin can otherwise edit by hand from Tutor
-          // Chats, so it shows up everywhere that already reads it.
-          adminChatLabel: tutorName,
-          date: null, time: null,
-          secondDemoResult: 'pass',
-          existingTutor: true,
-          tutorAccountCreated: true, // set true up front since we're creating their own login right now
-          submittedAt: new Date().toISOString()
-        };
         try{
-          // Create the booking record FIRST — createUserWithEmailAndPassword
-          // signs them in immediately and fires onAuthStateChanged, which
-          // looks up a matching booking by email right away. If that lookup
-          // ran before this record existed, they'd be told "no booking
-          // found" and get signed back out.
-          await saveBookings([...bookings, newRecord]);
-          await firebase.auth().createUserWithEmailAndPassword(email, password);
-          // onAuthStateChanged (set up in init) takes it from here — finds
-          // the booking above and switches straight to the chat view.
+          // The access code check, the account creation, and the booking
+          // record now all happen together server-side (see signUpAsTutor
+          // in functions/index.js) — this used to be a plain client-side
+          // Firestore write plus createUserWithEmailAndPassword, which
+          // meant the code was never actually enforced and a single-use
+          // invite couldn't be safely consumed exactly once.
+          const callable = fbFunctions.httpsCallable('signUpAsTutor');
+          await callable({ code, fullName, tutorName, email, password });
+          // Sign in now that the account genuinely exists — this fires
+          // onAuthStateChanged (set up in init), which finds the booking
+          // just created above and switches straight to the chat view.
+          await firebase.auth().signInWithEmailAndPassword(email, password);
         }catch(e){
           console.error('TUTOR SIGNUP ERROR:', e);
-          // Roll back the booking record so a failed signup doesn't leave an
-          // orphaned entry with no matching account behind.
-          await saveBookings(bookings.filter(b => b.id !== newId));
           d.busy = false;
-          d.error = e.code === 'auth/email-already-in-use'
-            ? 'An account with this email already exists — try signing in instead.'
-            : 'Something went wrong creating your account. Please try again.';
+          d.error = (e.message || 'Something went wrong creating your account. Please try again.');
           render();
         }
       };
@@ -5806,7 +5881,8 @@ function attachHandlers(){
               fullName: bk.fullName.trim(),
               email: bk.email.trim(),
               date: bk.date,
-              time: bk.time
+              time: bk.time,
+              code: verifiedApplicantCode
             });
             result = response.data && response.data.booking;
           }catch(e){
@@ -6057,13 +6133,15 @@ function attachHandlers(){
       if(exportBtn) exportBtn.onclick = () => {
         exportSubmissionsToExcel(applications, formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA, 'Langdy_Applications');
       };
-      const buildInviteBody = (name) => `Hi ${name},
+      const bulkResultCloseBtn = $('#bulkInviteResultCloseBtn');
+      if(bulkResultCloseBtn) bulkResultCloseBtn.onclick = () => { bulkInviteResultText = ''; render(); };
+      const buildInviteBody = (name, code) => `Hi ${name},
 
 Congratulations! You've been selected to move forward with your 1st Demo class.
 
 Please use the access code below to book your interview slot:
 
-Access Code: ${config.applicantCode}
+Access Code: ${code}
 
 Booking link: ${window.location.origin + window.location.pathname}
 
@@ -6121,9 +6199,13 @@ Langdy Team`;
           const id = el.dataset.inviteApp;
           const a = applications.find(x=>x.id===id);
           if(!a) return;
-          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName))}`;
+          // Reuse the existing code if this person was already invited once
+          // before (e.g. admin re-sending because the email bounced) rather
+          // than generating a new one and silently orphaning the old code.
+          const code = a.inviteCode || generateInviteCode();
+          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName, code))}`;
           window.open(gmailUrl, '_blank');
-          await saveOneApplication(Object.assign({}, a, { invited:true }));
+          await saveOneApplication(Object.assign({}, a, { invited:true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false }));
           render();
         };
       });
@@ -6133,13 +6215,24 @@ Langdy Team`;
         const ids = [...selectedApplicationIds];
         const selected = applications.filter(a => ids.includes(a.id));
         if(selected.length === 0) return;
-        const emails = selected.map(a => a.email).join(',');
-        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
-        window.open(gmailUrl, '_blank');
+        // A single combined email can't carry a different code per
+        // recipient, so bulk invite generates one code per person and
+        // lists them for admin to paste into their own mail-merge/BCC
+        // tool, instead of opening one shared-body Gmail compose.
         const batch = adminDb.batch();
-        selected.forEach(a => { batch.update(adminDb.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true }); });
+        const lines = [];
+        selected.forEach(a => {
+          const code = a.inviteCode || generateInviteCode();
+          batch.update(adminDb.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false });
+          lines.push(`${a.fullName} <${a.email}> — ${code}`);
+        });
         await batch.commit();
-        applications = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
+        applications = applications.map(a => {
+          if(!ids.includes(a.id)) return a;
+          const code = a.inviteCode || lines.find(l => l.includes(a.email)).split(' — ').pop();
+          return Object.assign({}, a, { invited:true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false });
+        });
+        bulkInviteResultText = lines.join('\n');
         selectedApplicationIds = new Set();
         render();
       };
@@ -6977,6 +7070,9 @@ Langdy Team`;
     }
 
     if(adminTab==='codes'){
+      if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
+      if(tutorSignupCodeAdmin === null) loadTutorSignupCodeForAdmin().then(render);
+      if(!codesTutorInvitesLoaded){ codesTutorInvitesLoaded = true; loadTutorInvites().then(render); }
       $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
       $('#codeSaveBtn').onclick = async () => {
         const s = codeChangeState;
@@ -6985,8 +7081,9 @@ Langdy Team`;
           s.error = 'Enter a new applicant code to change.'; render(); return;
         }
         s.busy = true; render();
-        const next = Object.assign({}, config, { applicantCode: s.newApplicant.trim() });
-        await saveConfig(next);
+        const newCode = s.newApplicant.trim();
+        await db.collection('adminSecrets').doc('applicantCode').set({ code: newCode });
+        applicantCodeAdmin = newCode;
         s.busy=false; s.success='Applicant code updated successfully.'; s.newApplicant='';
         render();
       };
@@ -6999,11 +7096,60 @@ Langdy Team`;
           s.error = 'Enter a new sign-up code to change.'; render(); return;
         }
         s.busy = true; render();
-        const next = Object.assign({}, config, { existingTutorCode: s.newExistingTutor.trim() });
-        await saveConfig(next);
+        const newCode = s.newExistingTutor.trim();
+        await db.collection('adminSecrets').doc('tutorSignup').set({ code: newCode });
+        tutorSignupCodeAdmin = newCode;
         s.busy=false; s.success='Existing tutor sign-up code updated successfully.'; s.newExistingTutor='';
         render();
       };
+
+      const tiNameInput = $('#tutorInviteNameInput');
+      if(tiNameInput) tiNameInput.oninput = e => { tutorInviteDraft.fullName = e.target.value; };
+      const tiEmailInput = $('#tutorInviteEmailInput');
+      if(tiEmailInput) tiEmailInput.oninput = e => { tutorInviteDraft.email = e.target.value; };
+      const tiGenerateBtn = $('#tutorInviteGenerateBtn');
+      if(tiGenerateBtn) tiGenerateBtn.onclick = async () => {
+        const d = tutorInviteDraft;
+        d.error = '';
+        const fullName = d.fullName.trim();
+        const email = d.email.trim();
+        if(!fullName){ d.error = 'Enter the tutor\'s name.'; render(); return; }
+        if(!isValidEmail(email)){ d.error = 'Enter a valid email address.'; render(); return; }
+        d.busy = true; render();
+        const code = generateInviteCode();
+        try{
+          await db.collection('tutorInvites').add({ fullName, email, code, used:false, createdAt: new Date().toISOString() });
+          const subject = "You're invited to create your tutor account — Langdy";
+          const body = `Hi ${fullName},
+
+You can now create your own chat login. Use the access code below:
+
+Access Code: ${code}
+
+Sign-up link: ${window.location.origin + window.location.pathname}?tutor-signup
+
+This code is just for you and works once.
+
+Best,
+Langdy Team`;
+          window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
+          await loadTutorInvites();
+          d.fullName=''; d.email=''; d.busy=false;
+          render();
+        }catch(e){
+          console.error('Failed to create tutor invite:', e);
+          d.busy=false; d.error='Something went wrong creating the invite. Please try again.';
+          render();
+        }
+      };
+      $$('[data-delete-tutor-invite]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.deleteTutorInvite;
+          await db.collection('tutorInvites').doc(id).delete();
+          tutorInvites = tutorInvites.filter(t => t.id !== id);
+          render();
+        };
+      });
 
       $('#cpCurrentInput').oninput = e => { changePasswordState.currentPassword = e.target.value; };
       $('#cpNewInput').oninput = e => { changePasswordState.newPassword = e.target.value; };
