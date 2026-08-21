@@ -232,7 +232,28 @@
   .admin-subtab.active{ color:#fff; background:var(--navy); }
   .admin-subtab:hover{ color:var(--navy); }
   .admin-subtab.active:hover{ color:#fff; }
-  .admin-tabs-mobile-select{ display:none; width:100%; padding:11px 14px; margin-bottom:20px; border:1.5px solid var(--line); border-radius:10px; font-size:14px; font-weight:700; font-family:inherit; background:#fff; }
+  .admin-mobile-menu-btn{ display:none; align-items:center; gap:10px; width:100%; padding:12px 14px; margin-bottom:18px; border:1.5px solid var(--line); border-radius:10px; background:#fff; font-size:14.5px; font-weight:700; font-family:inherit; color:var(--ink); cursor:pointer; text-align:left; }
+  .admin-sidebar-overlay{ display:none; position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:200; opacity:0; transition:opacity .18s ease; }
+  .admin-sidebar-overlay.open{ display:block; opacity:1; }
+  .admin-sidebar{
+    position:fixed; top:0; left:0; bottom:0; width:82%; max-width:320px; background:#fff; z-index:201;
+    transform:translateX(-100%); transition:transform .2s ease; overflow-y:auto; padding:16px 14px 30px;
+    box-shadow:2px 0 16px rgba(15,23,42,0.18); display:none;
+  }
+  .admin-sidebar.open{ display:block; transform:translateX(0); }
+  .admin-sidebar-close{ display:flex; justify-content:flex-end; margin-bottom:6px; }
+  .admin-sidebar-group-label{
+    font-size:11px; font-weight:800; color:var(--slate-light); text-transform:uppercase; letter-spacing:.04em;
+    margin:16px 4px 4px; padding-top:10px; border-top:1px solid var(--line);
+  }
+  .admin-sidebar-group-label:first-child{ margin-top:0; padding-top:0; border-top:none; }
+  .admin-sidebar-item{
+    display:flex; align-items:center; justify-content:space-between; padding:11px 12px; border-radius:8px;
+    font-size:14.5px; font-weight:600; color:var(--ink); cursor:pointer; user-select:none;
+  }
+  .admin-sidebar-item.active{ background:var(--navy); color:#fff; }
+  .admin-sidebar-item:hover{ background:#F5F6F8; }
+  .admin-sidebar-item.active:hover{ background:var(--navy); }
 
   /* ---------- calendar ---------- */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -338,10 +359,10 @@
 
     /* Swaps the admin nav's wrapped rows of tab buttons (messy on a phone
        — often 2-3 lines of wrapped buttons before you even reach the page
-       content) for a single dropdown select per row. Desktop keeps the
-       tab-button rows as-is. */
+       content) for a hamburger button that opens a slide-in sidebar.
+       Desktop keeps the tab-button rows as-is. */
     .admin-tabs-desktop, .admin-subtabs-desktop{ display:none; }
-    .admin-tabs-mobile-select{ display:block; }
+    .admin-mobile-menu-btn{ display:flex; }
 
     /* Chat list only (scoped via .chat-list-table, not the shared
        .list-table class other admin tables use) — collapses the desktop
@@ -911,6 +932,7 @@ let deviceForm = freshDeviceForm();
 
 
 let adminTab = 'calendar';
+let adminSidebarOpen = false; // mobile-only slide-in nav sidebar
 let calMonthOffset = 0;
 let calShowFirstDemo = true;
 let calShowSecondDemo = true;
@@ -3252,15 +3274,45 @@ function renderAdmin(){
           : newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
         return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${badge}</div>`;
       }).join('')}
-    </div>
-    <select class="admin-tabs-mobile-select" id="adminSubtabSelect" style="margin-bottom:20px;">
-      ${currentGroup.children.map(([k,label]) => {
-        const unread = unreadCountForTabKey(k);
-        const newCount = newCountForTabKey(k);
-        const count = unread>0 ? unread : newCount;
-        return `<option value="${k}" ${adminTab===k?'selected':''}>${label}${count>0?` (${count>9?'9+':count})`:''}</option>`;
-      }).join('')}
-    </select>` : '';
+    </div>` : '';
+
+  // Mobile-only: a hamburger button showing the current page name, and a
+  // slide-in sidebar listing every group (with its sub-tabs nested
+  // underneath, if any) as one flat, tappable list — replaces the wrapped
+  // multi-row tab buttons, which is what the desktop layout above still
+  // uses. Always rendered in the DOM; the 'open' class (toggled by
+  // adminSidebarOpen) is what actually shows it, so no separate branch is
+  // needed for open vs. closed.
+  const currentLeafLabel = currentGroup.children
+    ? (currentGroup.children.find(([k]) => k === adminTab) || currentGroup.children[0])[1]
+    : currentGroup.label;
+  const sidebarItemsHtml = TAB_GROUPS.map(g => {
+    if(!g.children){
+      const newCount = newCountForTabKey(g.tab);
+      const badge = newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
+      return `<div class="admin-sidebar-item ${adminTab===g.tab?'active':''}" data-group-tab="${g.tab}">${g.label}${badge}</div>`;
+    }
+    const items = g.children.map(([k,label]) => {
+      const unread = unreadCountForTabKey(k);
+      const newCount = newCountForTabKey(k);
+      const badge = unread>0
+        ? `<span class="unread-badge" style="margin-left:6px;">${unread}</span>`
+        : newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
+      return `<div class="admin-sidebar-item ${adminTab===k?'active':''}" data-tab="${k}" style="padding-left:22px;">${label}${badge}</div>`;
+    }).join('');
+    return `<div class="admin-sidebar-group-label">${g.label}</div>${items}`;
+  }).join('');
+  const mobileNavHtml = `
+    <button type="button" class="admin-mobile-menu-btn" id="adminMobileMenuBtn">
+      <span>☰</span><span>${escapeHtml(currentLeafLabel)}</span>
+    </button>
+    <div class="admin-sidebar-overlay ${adminSidebarOpen?'open':''}" id="adminSidebarOverlay"></div>
+    <div class="admin-sidebar ${adminSidebarOpen?'open':''}" id="adminSidebar">
+      <div class="admin-sidebar-close">
+        <button type="button" class="link-btn" id="adminSidebarCloseBtn" style="font-size:20px; padding:0;">✕</button>
+      </div>
+      ${sidebarItemsHtml}
+    </div>`;
 
   let body = '';
   if(adminTab==='applications') body = renderAdminApplications();
@@ -3290,14 +3342,7 @@ function renderAdmin(){
   return `
   <div class="admin-wrap">
     <div class="admin-tabs admin-tabs-desktop">${primaryTabsHtml}</div>
-    <select class="admin-tabs-mobile-select" id="adminGroupSelect">
-      ${TAB_GROUPS.map(g => {
-        const clickTarget = g.tab || g.children[0][0];
-        const keys = g.children ? g.children.map(([k]) => k) : [g.tab];
-        const newCount = keys.reduce((sum, k) => sum + newCountForTabKey(k), 0);
-        return `<option value="${clickTarget}" ${g===currentGroup?'selected':''}>${g.label}${newCount>0?` (${newCount>9?'9+':newCount})`:''}</option>`;
-      }).join('')}
-    </select>
+    ${mobileNavHtml}
     ${subTabsHtml}
     ${currentGroup.label === 'Chat' ? renderChatNotificationBanner() : ''}
     ${body}
@@ -5943,15 +5988,17 @@ function attachHandlers(){
 
   if(view==='admin'){
     $$('[data-group-tab]').forEach(el=>{
-      el.onclick = () => { adminTab = el.dataset.groupTab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+      el.onclick = () => { adminTab = el.dataset.groupTab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
     $$('[data-tab]').forEach(el=>{
-      el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+      el.onclick = () => { adminTab = el.dataset.tab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
-    const groupSelect = $('#adminGroupSelect');
-    if(groupSelect) groupSelect.onchange = e => { adminTab = e.target.value; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
-    const subtabSelect = $('#adminSubtabSelect');
-    if(subtabSelect) subtabSelect.onchange = e => { adminTab = e.target.value; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+    const mobileMenuBtn = $('#adminMobileMenuBtn');
+    if(mobileMenuBtn) mobileMenuBtn.onclick = () => { adminSidebarOpen = true; render(); };
+    const sidebarCloseBtn = $('#adminSidebarCloseBtn');
+    if(sidebarCloseBtn) sidebarCloseBtn.onclick = () => { adminSidebarOpen = false; render(); };
+    const sidebarOverlay = $('#adminSidebarOverlay');
+    if(sidebarOverlay) sidebarOverlay.onclick = () => { adminSidebarOpen = false; render(); };
 
     $$('[data-copy-link]').forEach(el=>{
       el.onclick = async () => {
