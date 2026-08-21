@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Interview Scheduling</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#16233F">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Langdy">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
@@ -2823,6 +2830,10 @@ let chatKnownMessageCounts = {};
 // subcollection just to detect "did something change" would defeat the
 // point of moving messages out of the booking document in the first place.
 let chatKnownLastMessageAt = {};
+// Guards subscribeToPushNotifications() from being re-attempted on every
+// single re-render of the chat view within one page session — once per
+// booking per load is enough.
+let pushAutoResubscribeAttempted = {};
 async function requestChatNotificationPermission(){
   if(typeof Notification === 'undefined') return;
   try{
@@ -2861,8 +2872,96 @@ function maybeShowChatNotification(senderName, messageText, bookingId, currently
     console.error('Failed to show notification:', e);
   }
 }
-// Renders the small bell toggle used to request/show notification status —
-// shared by both the admin and applicant/tutor chat panels.
+// --- Web Push (real, closed-app notifications) -----------------------------
+//
+// The Notification calls above only fire while a tab with this site is open
+// somewhere (even backgrounded) — they can't reach someone whose phone
+// browser is fully closed. Web Push closes that gap: a service worker
+// (sw.js) registered once can receive a push message and show a
+// notification even with no tab open at all. On Android/desktop this works
+// straight from a normal browser tab; on iPhone, Apple only allows it for a
+// site that's been added to the Home Screen and opened from that icon (see
+// the "add to Home Screen" banner rendered elsewhere) — a plain Safari tab
+// can never receive push on iOS, no exceptions.
+//
+// The public key below is exactly that — public. Only the matching PRIVATE
+// key (kept server-side as a Firebase secret, see functions/index.js) can
+// actually sign a push message this key will accept, so embedding this in
+// client code is safe by design.
+const VAPID_PUBLIC_KEY = 'BNqFVmOEkKwh0J2i4oLL361lhM6xPdR3axkew1yGr3xoxMJw6nu0I-vgpidHIoDKE0Nd7cptZ62kbfFq8rsPGDY';
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for(let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+// Small, deterministic hash of the subscription's endpoint URL, used as the
+// Firestore document ID — re-subscribing on the same device/browser then
+// just overwrites the same record instead of piling up duplicates every
+// time this runs (e.g. on every page load).
+function hashString(str){
+  let hash = 0;
+  for(let i=0; i<str.length; i++){
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+// Registers the service worker (idempotent — a no-op if already registered)
+// and subscribes this device/browser to Web Push, saving the subscription
+// under the given booking so the sendPushOnAdminMessage Cloud Function
+// knows where to deliver a push when admin sends a new message. Silently
+// does nothing wherever Push isn't supported (older browsers, or an iPhone
+// still in a regular Safari tab rather than installed) — the in-page
+// Notification system above still covers those cases while the tab is open.
+async function subscribeToPushNotifications(bookingId){
+  if(!bookingId) return;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const subJson = sub.toJSON();
+    if(!subJson.endpoint || !subJson.keys) return;
+    const subId = 'sub_' + hashString(subJson.endpoint);
+    await db.collection(BOOKINGS_COLLECTION).doc(bookingId).collection('pushSubscriptions').doc(subId).set({
+      endpoint: subJson.endpoint,
+      keys: subJson.keys,
+      userAgent: (navigator.userAgent||'').slice(0,200),
+      createdAt: new Date().toISOString()
+    });
+  }catch(e){
+    console.error('Push subscription failed:', e);
+  }
+}
+// True for an iPhone/iPad currently viewing the site as a plain Safari tab
+// (not installed) — the one case where push is possible in principle but
+// blocked purely by "not installed to Home Screen yet", worth a specific
+// nudge rather than just silently not working.
+function isIOSNotStandalone(){
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const isStandalone = window.navigator.standalone === true
+    || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  return isIOS && !isStandalone;
+}
+function renderIOSInstallHint(){
+  if(!isIOSNotStandalone()) return '';
+  return `
+  <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; margin-top:8px; border-radius:10px; background:var(--gold-bg); border:1.5px solid var(--gold-dark);">
+    <span style="font-size:18px;">📲</span>
+    <div style="font-size:12px; color:var(--ink); line-height:1.5;">On iPhone, notifications only work after adding this to your Home Screen: tap the <strong>Share</strong> button, then <strong>"Add to Home Screen"</strong> — then open it from that icon instead of Safari.</div>
+  </div>`;
+}
+
 function renderChatNotificationToggle(){
   if(typeof Notification === 'undefined') return '';
   if(chatNotificationPermission === 'granted'){
@@ -2894,16 +2993,23 @@ function renderChatNotificationBanner(){
     </div>
     ${denied ? '' : `
     <button type="button" id="chatNotifBannerToggle" class="btn ${on?'btn-ghost':'btn-gold'} btn-sm" style="width:auto; padding:9px 18px; white-space:nowrap;">${on?'Turn Off':'Turn On'}</button>`}
-  </div>`;
+  </div>
+  ${renderIOSInstallHint()}`;
 }
 // Shared click handler for both the small toggle and the big banner button —
 // requests permission the first time, and just flips the mute flag on
 // every subsequent click since permission itself can't be re-requested or
-// revoked programmatically once granted.
-async function toggleChatNotifications(){
+// revoked programmatically once granted. bookingId is only meaningful for
+// the applicant/tutor's own chat (there's exactly one possible
+// conversation to subscribe to); admin's usage omits it, since push
+// delivery here is specifically for admin's messages reaching the
+// applicant/tutor, not the other direction.
+async function toggleChatNotifications(bookingId){
   if(chatNotificationPermission !== 'granted'){
     await requestChatNotificationPermission();
     chatNotificationsEnabled = true;
+    if(chatNotificationPermission === 'granted' && bookingId) await subscribeToPushNotifications(bookingId);
+    render();
   } else {
     chatNotificationsEnabled = !chatNotificationsEnabled;
     render();
@@ -2912,10 +3018,10 @@ async function toggleChatNotifications(){
 // Binds every possible notification control (the big banner button and the
 // small inline toggle, in whichever state each currently renders) to the
 // same handler — call this once per render wherever either might appear.
-function wireChatNotificationControls(){
+function wireChatNotificationControls(bookingId){
   ['chatEnableNotifsBtn','chatMuteNotifsBtn','chatUnmuteNotifsBtn','chatNotifBannerToggle'].forEach(id => {
     const el = document.getElementById(id);
-    if(el) el.onclick = toggleChatNotifications;
+    if(el) el.onclick = () => toggleChatNotifications(bookingId);
   });
 }
 
@@ -4962,7 +5068,10 @@ function attachHandlers(){
   // Wired once here regardless of view — harmless no-op wherever none of
   // these buttons happen to be in the DOM (the banner can show at the top
   // of the admin Chat tab group, or the tutor/applicant's own chat view).
-  wireChatNotificationControls();
+  // Passing bk.id here (only meaningful when we're actually on that view)
+  // is what lets turning notifications on ALSO subscribe this device to
+  // real push for that specific conversation.
+  wireChatNotificationControls(view==='book' && bk.done ? bk.id : undefined);
 
   const logoutBtn = $('#logoutBtn');
   if(logoutBtn) logoutBtn.onclick = async () => {
@@ -5685,6 +5794,14 @@ function attachHandlers(){
     };
     const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
     if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
+    if(bk.id && chatNotificationPermission === 'granted' && chatNotificationsEnabled && !pushAutoResubscribeAttempted[bk.id]){
+      // A returning visitor who already granted permission before doesn't
+      // need to click the toggle again — quietly re-establish (or confirm)
+      // the push subscription for this device once per session, so it
+      // stays current even if it lapsed for some reason.
+      pushAutoResubscribeAttempted[bk.id] = true;
+      subscribeToPushNotifications(bk.id);
+    }
     if(bk.id) startChatPolling(bk.id, async () => {
       if(view==='book' && bk.done){
         const fresh = bookings.find(b => b.id === bk.id);
