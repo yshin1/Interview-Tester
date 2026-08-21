@@ -232,6 +232,7 @@
   .admin-subtab.active{ color:#fff; background:var(--navy); }
   .admin-subtab:hover{ color:var(--navy); }
   .admin-subtab.active:hover{ color:#fff; }
+  .admin-tabs-mobile-select{ display:none; width:100%; padding:11px 14px; margin-bottom:20px; border:1.5px solid var(--line); border-radius:10px; font-size:14px; font-weight:700; font-family:inherit; background:#fff; }
 
   /* ---------- calendar ---------- */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -334,6 +335,13 @@
     .cal-cell{ min-height:70px; font-size:10px; }
     table.list-table{ font-size:12px; }
     .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
+
+    /* Swaps the admin nav's wrapped rows of tab buttons (messy on a phone
+       — often 2-3 lines of wrapped buttons before you even reach the page
+       content) for a single dropdown select per row. Desktop keeps the
+       tab-button rows as-is. */
+    .admin-tabs-desktop, .admin-subtabs-desktop{ display:none; }
+    .admin-tabs-mobile-select{ display:block; }
 
     /* Chat list only (scoped via .chat-list-table, not the shared
        .list-table class other admin tables use) — collapses the desktop
@@ -3218,7 +3226,7 @@ function renderAdmin(){
     return `<div class="admin-tab ${isActive?'active':''}" data-group-tab="${clickTarget}">${g.label}${newCount>0?`<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>`:''}</div>`;
   }).join('');
   const subTabsHtml = currentGroup.children ? `
-    <div class="admin-subtabs">
+    <div class="admin-subtabs admin-subtabs-desktop">
       ${currentGroup.children.map(([k,label]) => {
         const unread = unreadCountForTabKey(k);
         const newCount = newCountForTabKey(k);
@@ -3227,7 +3235,15 @@ function renderAdmin(){
           : newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
         return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${badge}</div>`;
       }).join('')}
-    </div>` : '';
+    </div>
+    <select class="admin-tabs-mobile-select" id="adminSubtabSelect" style="margin-bottom:20px;">
+      ${currentGroup.children.map(([k,label]) => {
+        const unread = unreadCountForTabKey(k);
+        const newCount = newCountForTabKey(k);
+        const count = unread>0 ? unread : newCount;
+        return `<option value="${k}" ${adminTab===k?'selected':''}>${label}${count>0?` (${count>9?'9+':count})`:''}</option>`;
+      }).join('')}
+    </select>` : '';
 
   let body = '';
   if(adminTab==='applications') body = renderAdminApplications();
@@ -3256,7 +3272,15 @@ function renderAdmin(){
 
   return `
   <div class="admin-wrap">
-    <div class="admin-tabs">${primaryTabsHtml}</div>
+    <div class="admin-tabs admin-tabs-desktop">${primaryTabsHtml}</div>
+    <select class="admin-tabs-mobile-select" id="adminGroupSelect">
+      ${TAB_GROUPS.map(g => {
+        const clickTarget = g.tab || g.children[0][0];
+        const keys = g.children ? g.children.map(([k]) => k) : [g.tab];
+        const newCount = keys.reduce((sum, k) => sum + newCountForTabKey(k), 0);
+        return `<option value="${clickTarget}" ${g===currentGroup?'selected':''}>${g.label}${newCount>0?` (${newCount>9?'9+':newCount})`:''}</option>`;
+      }).join('')}
+    </select>
     ${subTabsHtml}
     ${currentGroup.label === 'Chat' ? renderChatNotificationBanner() : ''}
     ${body}
@@ -5899,6 +5923,10 @@ function attachHandlers(){
     $$('[data-tab]').forEach(el=>{
       el.onclick = () => { adminTab = el.dataset.tab; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
     });
+    const groupSelect = $('#adminGroupSelect');
+    if(groupSelect) groupSelect.onchange = e => { adminTab = e.target.value; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+    const subtabSelect = $('#adminSubtabSelect');
+    if(subtabSelect) subtabSelect.onchange = e => { adminTab = e.target.value; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
 
     $$('[data-copy-link]').forEach(el=>{
       el.onclick = async () => {
