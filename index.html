@@ -392,6 +392,16 @@
     .ticket-name{ font-size:19px; }
     .ticket-row{ font-size:13px; }
 
+    /* Dynamic form fields (apply/device/signup) — the desktop padding on
+       .form-question (20px 22px) eats too much of an already-narrow phone
+       screen, and the section banner's generous margins push content
+       further down than needed on a shorter viewport. */
+    .form-question{ padding:14px 16px; margin-bottom:14px; }
+    .form-section-banner{ padding:11px 16px; font-size:15px; margin:22px 0 12px; }
+    .form-section-desc{ font-size:13px; margin:8px 0 16px; padding:0; }
+    .apply-section{ margin-bottom:20px; }
+    .field{ margin-bottom:12px; }
+
     .warn-box{ padding:14px; gap:9px; }
     .warn-box .txt{ font-size:13.5px; }
     .warn-box.strong .txt{ font-size:14px; }
@@ -2381,6 +2391,7 @@ function renderGate(){
       <button class="btn btn-primary" id="gateSubmit" ${gateBusy?'disabled':''}>${gateBusy?'Checking…':'Enter'}</button>
       ${gateError ? `<div class="error-text">${escapeHtml(gateError)}</div>` : ''}
       <button class="find-link" id="gateSwitchToFind">Already booked? Find your chat →</button>
+      <button class="find-link" id="gateSwitchToTutorLogin" style="display:block; margin-top:8px;">Already a tutor? Sign in here →</button>
     </div>
   </div>`;
 }
@@ -5465,6 +5476,8 @@ function attachHandlers(){
       $('#gateCode').focus();
       const findLink = $('#gateSwitchToFind');
       if(findLink) findLink.onclick = () => { gateMode='find'; findError=''; render(); };
+      const tutorLink = $('#gateSwitchToTutorLogin');
+      if(tutorLink) tutorLink.onclick = () => { gateMode='tutorLogin'; tutorLoginError=''; render(); };
     } else if(gateMode==='adminLogin'){
       const submit = async () => {
         const email = $('#adminLoginEmailInput').value.trim();
