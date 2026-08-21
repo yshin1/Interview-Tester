@@ -2918,6 +2918,18 @@ function hashString(str){
   }
   return Math.abs(hash);
 }
+// Registered unconditionally, as early as possible, independent of the
+// booking/notification flow below — this is what makes Chrome treat the
+// site as a real installable app (proper "Install app" prompt) rather than
+// only offering the plain bookmark-style "Add to Home Screen" shortcut,
+// which doesn't require a service worker at all. Previously this only ran
+// inside subscribeToPushNotifications(), so anyone who hadn't finished a
+// booking and turned on notifications yet had no service worker running,
+// and installability was never detected for them.
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(e => console.error('SW registration failed:', e));
+}
+
 // Registers the service worker (idempotent — a no-op if already registered)
 // and subscribes this device/browser to Web Push, saving the subscription
 // under the given booking so the sendPushOnAdminMessage Cloud Function
