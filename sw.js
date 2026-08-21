@@ -24,10 +24,15 @@ self.addEventListener('push', (event) => {
     badge: 'icon-192.png',
     // Same tag per booking (no timestamp) so a second message while the
     // first notification is still showing UPDATES it in place instead of
-    // stacking a separate one — renotify:true keeps the alert/vibration
-    // firing on every update even though the tag matches.
+    // stacking a separate one — renotify:true keeps the alert firing on
+    // every update even though the tag matches. Android Chrome has been
+    // seen to silently skip the vibration on a renotify update unless a
+    // pattern is given explicitly (rather than relying on the device's
+    // default), so it's spelled out here instead of left implicit.
     tag: 'chat-' + (data.bookingId || 'unknown'),
     renotify: true,
+    vibrate: [200, 100, 200],
+    silent: false,
     data: { bookingId: data.bookingId || null }
   };
   // App icon badge (the little number on the home-screen icon) — only
