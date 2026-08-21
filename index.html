@@ -2300,6 +2300,7 @@ function renderGate(){
         <button class="btn btn-primary" id="tutorLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
         ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
         <button class="find-link" id="gateSwitchToForgotPassword" style="display:block; margin-top:14px;">Forgot your password?</button>
+        <button class="find-link" id="gateSwitchToTutorSignupFromLogin" style="display:block; margin-top:8px;">New tutor? Create your account →</button>
         <button class="find-link" id="gateSwitchToCodeFromTutor" style="display:block; margin-top:8px;">← Back to access code</button>
       </div>
     </div>`;
@@ -5477,7 +5478,7 @@ function attachHandlers(){
       const findLink = $('#gateSwitchToFind');
       if(findLink) findLink.onclick = () => { gateMode='find'; findError=''; render(); };
       const tutorLink = $('#gateSwitchToTutorLogin');
-      if(tutorLink) tutorLink.onclick = () => { gateMode='tutorLogin'; tutorLoginError=''; render(); };
+      if(tutorLink) tutorLink.onclick = () => { gateMode='tutorLogin'; tutorLoginError=''; cameFromTutorLink=true; render(); };
     } else if(gateMode==='adminLogin'){
       const submit = async () => {
         const email = $('#adminLoginEmailInput').value.trim();
@@ -5582,7 +5583,14 @@ function attachHandlers(){
       $('#tutorLoginEmailInput').oninput = e => { tutorLoginEmail = e.target.value; };
       (tutorLoginEmail ? $('#tutorLoginPasswordInput') : $('#tutorLoginEmailInput')).focus();
       const tutorBackLink = $('#gateSwitchToCodeFromTutor');
-      if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; render(); };
+      if(tutorBackLink) tutorBackLink.onclick = () => { gateMode='code'; tutorLoginError=''; cameFromTutorLink=false; render(); };
+      const toSignupLink = $('#gateSwitchToTutorSignupFromLogin');
+      if(toSignupLink) toSignupLink.onclick = () => {
+        tutorSignupDraft = Object.assign({}, tutorSignupDraft, { error: '' });
+        gateMode = 'tutorSignup';
+        cameFromTutorLink = true;
+        render();
+      };
       const forgotLink = $('#gateSwitchToForgotPassword');
       if(forgotLink) forgotLink.onclick = () => {
         tutorForgotPasswordState = { email: tutorLoginEmail, error: '', success: '', busy: false };
@@ -7640,7 +7648,10 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
         // Don't let a persisted tutor session (from this same browser,
         // unrelated to this pageview) leak into a regular tester's booking
         // flow — currentTutorUser must stay null here so renderBookDone()
-        // shows the normal ticket UI, not the tutor chat UI.
+        // shows the normal ticket UI, not the tutor chat UI. Reaching tutor
+        // sign-in no longer requires a separate ?tutor URL/reinstall either
+        // way — see the "Already a tutor?" link on the default gate screen,
+        // which flips gateMode client-side without navigating at all.
         render();
         return;
       }
