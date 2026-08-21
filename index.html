@@ -1374,6 +1374,13 @@ async function markChatReadByApplicant(bookingId){
   await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ lastReadByApplicant: now, unreadCountForApplicant: 0 });
   const idx = bookings.findIndex(b => b.id === bookingId);
   if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { lastReadByApplicant: now, unreadCountForApplicant: 0 });
+  // Clears the Home Screen icon badge for the case where the user opened
+  // the app directly instead of tapping the push notification (which
+  // clears it itself, see sw.js's notificationclick handler) — otherwise
+  // a stale badge number would linger even after everything's been read.
+  if(typeof navigator !== 'undefined' && 'clearAppBadge' in navigator){
+    navigator.clearAppBadge().catch(()=>{});
+  }
 }
 
 // Guideline messages auto-sent once the applicant's chat message contains
