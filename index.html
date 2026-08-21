@@ -33,6 +33,7 @@
     --gold:#C79A3B;
     --gold-dark:#A87F2C;
     --gold-bg:#FBF3E1;
+    --brand-orange:#FF6A2A;
     --success:#2F7D5E;
     --success-bg:#E7F4EE;
     --danger:#B3432B;
@@ -64,9 +65,9 @@
   .topbar .brand{ display:flex; align-items:center; gap:10px; }
   .brand-mark{
     width:32px;height:32px;border-radius:8px;
-    background:var(--gold);
+    background:var(--brand-orange);
     display:flex;align-items:center;justify-content:center;
-    font-weight:800;color:var(--navy);font-size:15px;
+    font-weight:500;color:#fff;font-size:16px;
   }
   .brand-name{ font-weight:700; font-size:16px; letter-spacing:0.2px; }
   .brand-sub{ font-size:12px; color:#B9C2D6; margin-top:1px; }
@@ -2147,7 +2148,7 @@ function renderTopbar(mode){ // 'admin' | 'tutor' | 'applicant'
   return `
   <div class="topbar">
     <div class="brand">
-      <div class="brand-mark">IV</div>
+      <div class="brand-mark">L</div>
       <div>
         <div class="brand-name">Interview Scheduling</div>
         <div class="brand-sub">${isAdmin ? 'Admin Console' : isTutor ? 'Tutor Chat' : 'Applicant Booking'}</div>
@@ -2209,7 +2210,7 @@ function renderGate(){
     return `
     <div class="center-screen">
       <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Admin Sign In</h1>
         <p class="gate-sub">Sign in with your admin email and password.</p>
         <div class="field">
@@ -2230,7 +2231,7 @@ function renderGate(){
     return `
     <div class="center-screen">
       <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Tutor Sign In</h1>
         <p class="gate-sub">Sign in with the email and password you set up to see your chat.</p>
         <div class="field">
@@ -2253,7 +2254,7 @@ function renderGate(){
     return `
     <div class="center-screen">
       <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Reset Password</h1>
         <p class="gate-sub">Enter your account email and we'll send you a link to set a new password.</p>
         <div class="field">
@@ -2272,7 +2273,7 @@ function renderGate(){
     return `
     <div class="center-screen">
       <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Tutor Sign Up</h1>
         <p class="gate-sub">For tutors already working with us who don't have a chat account yet. You'll need the access code shared with the team.</p>
         <div class="field">
@@ -2309,7 +2310,7 @@ function renderGate(){
     return `
     <div class="center-screen">
       <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+        <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Find Your Chat</h1>
         <p class="gate-sub">Enter the email you used when booking to continue your chat.</p>
         <div class="field">
@@ -2325,7 +2326,7 @@ function renderGate(){
   return `
   <div class="center-screen">
     <div class="card gate-card">
-      <div class="brand-mark" style="margin-bottom:16px;">IV</div>
+      <div class="brand-mark" style="margin-bottom:16px;">L</div>
       <h1 class="gate-title">Interview Scheduling</h1>
       <p class="gate-sub">Please enter the access code you were given.</p>
       <div class="field">
