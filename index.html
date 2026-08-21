@@ -5688,6 +5688,7 @@ function attachHandlers(){
                agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
         rememberMyBooking(match.id);
         findBusy=false; view='book'; render();
+        checkAndMarkApplicantChatRead();
       };
       $('#findSubmit').onclick = submit;
       $('#findEmailInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
@@ -7495,6 +7496,7 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
             bk = { step:3, date:data.date, time:data.time, fullName:data.fullName, email:data.email,
                    agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: data.id };
             view = 'book';
+            checkAndMarkApplicantChatRead();
           }
         } else {
           forgetMyBooking(); // booking no longer exists (cancelled/deleted) — nothing to restore
@@ -7604,6 +7606,7 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
                    agree1:true, agree2:true, error:'', busy:false, done:true, weekOffset:0, id: match.id };
             view = 'book';
             if(!bookings.some(b => b.id === match.id)) bookings.push(match);
+            checkAndMarkApplicantChatRead();
           } else {
             tutorLoginError = "Signed in, but couldn't find a booking under this email. Please contact the admin.";
             gateMode = 'tutorLogin';
