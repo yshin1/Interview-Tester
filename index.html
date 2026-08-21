@@ -334,6 +334,23 @@
     .cal-cell{ min-height:70px; font-size:10px; }
     table.list-table{ font-size:12px; }
     .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
+
+    /* Chat list only (scoped via .chat-list-table, not the shared
+       .list-table class other admin tables use) — collapses the desktop
+       4-column table into a stacked, tappable card per conversation
+       showing just name / last message / unread count, since a wide
+       table with a "When" column doesn't fit a phone screen usefully. */
+    table.chat-list-table thead{ display:none; }
+    table.chat-list-table, table.chat-list-table tbody, table.chat-list-table tr, table.chat-list-table td{
+      display:block; width:100%;
+    }
+    table.chat-list-table tr{
+      position:relative; border:1.5px solid var(--line); border-radius:12px;
+      padding:12px 44px 12px 14px; margin-bottom:10px;
+    }
+    table.chat-list-table td{ padding:2px 0; border:none; font-size:13px; }
+    table.chat-list-table td:nth-child(3){ display:none; } /* "When" timestamp */
+    table.chat-list-table td:nth-child(4){ position:absolute; top:12px; right:14px; padding:0; }
   }
 
   /* ---------- phone-sized screens: applicant/tutor booking + chat ----------
@@ -4109,14 +4126,14 @@ function renderAdminChats(){
   const totalUnreadThreads = withMsgs.filter(b => unreadCountForAdmin(b) > 0).length;
 
   const emptyMessage = q ? 'No conversations match that search.' : chatsFilterUnreadOnly ? 'No unread messages.' : 'No conversations yet.';
-  const rows = sorted.length === 0 ? `<tr><td colspan="5" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const last = lastMessageInfo(b);
     const unread = unreadCountForAdmin(b);
     const stage = chatStageOf(b) === '2nd' ? '2nd Demo' : '1st Demo';
     const who = last.from === 'admin' ? 'You' : b.fullName;
     const preview = last.text.length > 60 ? last.text.slice(0,60)+'…' : last.text;
     return `
-    <tr>
+    <tr data-chat-id="${b.id}" style="cursor:pointer;">
       <td><strong>${escapeHtml(b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${stage}</span></td>
       <td style="max-width:340px;">
         <span style="font-weight:${unread>0?'700':'400'};">${escapeHtml(who)}:</span>
@@ -4124,7 +4141,6 @@ function renderAdminChats(){
       </td>
       <td class="tag">${new Date(last.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
       <td>${unread>0 ? `<span class="unread-badge">${unread}</span>` : ''}</td>
-      <td><button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button></td>
     </tr>`;
   }).join('');
 
@@ -4142,8 +4158,8 @@ function renderAdminChats(){
         Unread only (${totalUnreadThreads})
       </label>
     </div>
-    <table class="list-table">
-      <thead><tr><th>Applicant</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
+    <table class="list-table chat-list-table">
+      <thead><tr><th>Applicant</th><th>Last Message</th><th>When</th><th>Unread</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
