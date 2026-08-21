@@ -2781,7 +2781,7 @@ function renderBookDone(){
       <p style="font-size:13px; color:var(--slate); margin:0 0 4px; line-height:1.6;">Send us a quick message below to confirm — this is how we know you're really coming.</p>
       <p style="font-size:13.5px; color:var(--danger); font-weight:700; margin:0 0 12px; line-height:1.6;">⚠️ Please start by typing your Full Name.</p>`}
 
-      ${renderChatNotificationBanner()}
+      ${renderChatNotificationBanner(bk.id)}
       ${renderChatPanel(bk.id, 'applicant')}
 
       ${isTutorSession ? `
@@ -3019,10 +3019,12 @@ function renderChatNotificationToggle(){
 // with a proper ON/OFF switch, meant to sit at the top of the Chat tab
 // itself (and the tutor/applicant's own chat view) rather than tucked into
 // a corner of an individual conversation.
-function renderChatNotificationBanner(){
+function renderChatNotificationBanner(bookingId){
   if(typeof Notification === 'undefined') return '';
   const denied = chatNotificationPermission === 'denied';
   const on = chatNotificationPermission === 'granted' && chatNotificationsEnabled;
+  const b = bookingId ? bookings.find(x => x.id === bookingId) : null;
+  const silentOn = !!(b && b.pushMuted);
   return `
   <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; margin-bottom:14px; border-radius:10px; background:${on?'rgba(46,160,67,0.08)':'var(--paper-2)'}; border:1.5px solid ${on?'rgba(46,160,67,0.35)':'var(--line)'};">
     <div style="display:flex; align-items:center; gap:10px;">
@@ -3035,6 +3037,10 @@ function renderChatNotificationBanner(){
     ${denied ? '' : `
     <button type="button" id="chatNotifBannerToggle" class="btn ${on?'btn-ghost':'btn-gold'} btn-sm" style="width:auto; padding:9px 18px; white-space:nowrap;">${on?'Turn Off':'Turn On'}</button>`}
   </div>
+  ${on && b ? `
+  <div style="display:flex; justify-content:flex-end; margin:-8px 0 14px;">
+    <button type="button" id="chatNotifSilentToggle" class="link-btn" style="font-size:11px; color:var(--slate-light); padding:0;">${silentOn?'🔇 Silent — tap to turn sound/vibration back on':'🔊 Sound & vibration on — tap for silent mode'}</button>
+  </div>` : ''}
   ${renderIOSInstallHint()}`;
 }
 // Shared click handler for both the small toggle and the big banner button —
@@ -3056,6 +3062,19 @@ async function toggleChatNotifications(bookingId){
     render();
   }
 }
+// Flips whether push notifications for this booking play sound/vibrate —
+// stored on the booking doc (not just locally) since sw.js reads it via
+// the push payload built server-side, and needs the preference to still
+// apply even when this tab/app isn't open to hold it in memory.
+async function toggleChatNotificationSilent(bookingId){
+  if(!bookingId) return;
+  const b = bookings.find(x => x.id === bookingId);
+  const next = !(b && b.pushMuted);
+  await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ pushMuted: next });
+  const idx = bookings.findIndex(x => x.id === bookingId);
+  if(idx !== -1) bookings[idx] = Object.assign({}, bookings[idx], { pushMuted: next });
+  render();
+}
 // Binds every possible notification control (the big banner button and the
 // small inline toggle, in whichever state each currently renders) to the
 // same handler — call this once per render wherever either might appear.
@@ -3064,6 +3083,8 @@ function wireChatNotificationControls(bookingId){
     const el = document.getElementById(id);
     if(el) el.onclick = () => toggleChatNotifications(bookingId);
   });
+  const silentBtn = document.getElementById('chatNotifSilentToggle');
+  if(silentBtn) silentBtn.onclick = () => toggleChatNotificationSilent(bookingId);
 }
 
 function renderChatPanel(bookingId, viewerRole){
