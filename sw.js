@@ -32,7 +32,11 @@ self.addEventListener('push', (event) => {
     tag: 'chat-' + (data.bookingId || 'unknown'),
     renotify: true,
     vibrate: [200, 100, 200],
-    silent: false,
+    // Reflects the applicant/tutor's own mute preference (see
+    // toggleChatNotificationSilent() in the main HTML file) rather than a
+    // fixed value — silent:true suppresses sound/vibration regardless of
+    // the vibrate pattern above, per spec.
+    silent: !!data.silent,
     data: { bookingId: data.bookingId || null }
   };
   // App icon badge (the little number on the home-screen icon) — only
