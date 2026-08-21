@@ -2227,7 +2227,7 @@ function render(){
   else if(view==='signupForm') app.innerHTML = renderSignupFormPage();
   else if(view==='deviceForm') app.innerHTML = renderDeviceFormPage();
   else if(view==='gate') app.innerHTML = renderGate();
-  else if(view==='book') app.innerHTML = renderTopbar(currentTutorUser ? 'tutor' : 'applicant') + renderBook();
+  else if(view==='book') app.innerHTML = renderTopbar(currentTutorUser ? 'tutor' : 'applicant') + renderBook() + (tutorProfileModalOpen ? renderTutorProfileModal() : '');
   else if(view==='admin') app.innerHTML = renderTopbar('admin') + renderAdmin();
   attachHandlers();
 }
@@ -2246,6 +2246,7 @@ function renderTopbar(mode){ // 'admin' | 'tutor' | 'applicant'
     </div>
     <div class="right">
       ${isAdmin ? '<span class="badge-admin">ADMIN</span>' : ''}
+      ${isTutor ? '<button class="link-btn" id="tutorProfileBtn">⚙️ Profile</button>' : ''}
       <button class="link-btn" id="logoutBtn">${(isAdmin || isTutor) ? 'Log Out' : 'Exit'}</button>
     </div>
   </div>`;
@@ -2264,6 +2265,7 @@ let cameFromAdminLink = false;
 // link) — logging out should return to the tutor login form, not the plain
 // applicant code screen.
 let cameFromTutorLink = false;
+let tutorProfileModalOpen = false; // holds Chat Display Name + Change Password, moved out of the main chat view into a compact modal
 
 // Firebase Authentication state for the admin. `currentAdminUser` mirrors
 // firebase.auth().currentUser and persists across reloads automatically
@@ -2787,7 +2789,6 @@ function renderStepInfo(){
 
 function renderBookDone(){
   const isTutorSession = !!currentTutorUser;
-  const p = tutorChangePasswordState;
   const n = tutorNameEditState;
   if(isTutorSession && !n.value && !n.busy) n.value = bk.fullName;
   return `
@@ -2808,40 +2809,56 @@ function renderBookDone(){
       ${renderChatNotificationBanner(bk.id)}
       ${renderChatPanel(bk.id, 'applicant')}
 
-      ${isTutorSession ? `
-      <div class="card" style="margin-top:20px; background:#FAFBFC;">
-        <div class="section-title" style="font-size:13.5px;">Chat Display Name</div>
-        <div class="field">
-          <label>Name shown in chat</label>
-          <input type="text" id="tutorNameInput" placeholder="Your name" value="${escapeHtml(n.value)}">
-        </div>
-        ${n.error ? `<div class="error-text">${escapeHtml(n.error)}</div>` : ''}
-        ${n.success ? `<div class="success-text">${escapeHtml(n.success)}</div>` : ''}
-        <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorNameSaveBtn" ${n.busy?'disabled':''}>${n.busy?'Saving…':'Save Name'}</button>
-      </div>
-      <div class="card" style="margin-top:16px; background:#FAFBFC;">
-        <div class="section-title" style="font-size:13.5px;">Change Password</div>
-        <div class="field">
-          <label>Current Password</label>
-          <input type="password" id="tcpCurrentInput" placeholder="Enter your current password" value="${escapeHtml(p.currentPassword)}" autocomplete="current-password">
-        </div>
-        <div class="field">
-          <label>New Password</label>
-          <input type="password" id="tcpNewInput" placeholder="At least 6 characters" value="${escapeHtml(p.newPassword)}" autocomplete="new-password">
-        </div>
-        <div class="field">
-          <label>Confirm New Password</label>
-          <input type="password" id="tcpConfirmInput" placeholder="Re-enter new password" value="${escapeHtml(p.confirmPassword)}" autocomplete="new-password">
-        </div>
-        ${p.error ? `<div class="error-text">${escapeHtml(p.error)}</div>` : ''}
-        ${p.success ? `<div class="success-text">${escapeHtml(p.success)}</div>` : ''}
-        <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorChangePasswordBtn" ${p.busy?'disabled':''}>${p.busy?'Saving…':'Change Password'}</button>
-      </div>` : `
+      ${isTutorSession ? '' : `
       <div class="warn-box strong" style="margin-top:16px;">
         <div class="icon">⏰</div>
         <div class="txt">If we do not receive a message from you within <u>1 hour</u> of booking, your reservation may be automatically cancelled.</div>
       </div>
       <p class="hint" style="margin-top:10px;">This browser will remember your chat automatically next time — no need to re-enter your email on this device. <button class="link-btn" id="notMeLink" style="font-size:12px; padding:0; text-decoration:underline;">Not you, or using a shared computer?</button></p>`}
+    </div>
+  </div>`;
+}
+
+// Chat Display Name + Change Password — used to sit as two full-width
+// cards under every tutor's chat, all the time, even though they're
+// touched maybe once. Now tucked behind the topbar's "⚙️ Profile" button
+// instead, opened as a modal on demand.
+function renderTutorProfileModal(){
+  const p = tutorChangePasswordState;
+  const n = tutorNameEditState;
+  if(!n.value && !n.busy) n.value = bk.fullName;
+  return `
+  <div class="modal-overlay" id="tutorProfileOverlay">
+    <div class="modal" style="max-width:440px; max-height:85vh; overflow:auto;">
+      <h3>Profile Settings</h3>
+      <div class="section-title" style="font-size:13.5px; margin-top:10px;">Chat Display Name</div>
+      <div class="field">
+        <label>Name shown in chat</label>
+        <input type="text" id="tutorNameInput" placeholder="Your name" value="${escapeHtml(n.value)}">
+      </div>
+      ${n.error ? `<div class="error-text">${escapeHtml(n.error)}</div>` : ''}
+      ${n.success ? `<div class="success-text">${escapeHtml(n.success)}</div>` : ''}
+      <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorNameSaveBtn" ${n.busy?'disabled':''}>${n.busy?'Saving…':'Save Name'}</button>
+      <div class="divider" style="margin:20px 0;"></div>
+      <div class="section-title" style="font-size:13.5px;">Change Password</div>
+      <div class="field">
+        <label>Current Password</label>
+        <input type="password" id="tcpCurrentInput" placeholder="Enter your current password" value="${escapeHtml(p.currentPassword)}" autocomplete="current-password">
+      </div>
+      <div class="field">
+        <label>New Password</label>
+        <input type="password" id="tcpNewInput" placeholder="At least 6 characters" value="${escapeHtml(p.newPassword)}" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label>Confirm New Password</label>
+        <input type="password" id="tcpConfirmInput" placeholder="Re-enter new password" value="${escapeHtml(p.confirmPassword)}" autocomplete="new-password">
+      </div>
+      ${p.error ? `<div class="error-text">${escapeHtml(p.error)}</div>` : ''}
+      ${p.success ? `<div class="success-text">${escapeHtml(p.success)}</div>` : ''}
+      <button class="btn btn-primary" style="width:auto; padding:11px 22px; margin-top:6px;" id="tutorChangePasswordBtn" ${p.busy?'disabled':''}>${p.busy?'Saving…':'Change Password'}</button>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="tutorProfileCloseBtn">Close</button>
+      </div>
     </div>
   </div>`;
 }
@@ -5164,10 +5181,18 @@ function attachHandlers(){
   // real push for that specific conversation.
   wireChatNotificationControls(view==='book' && bk.done ? bk.id : undefined);
 
+  const tutorProfileBtn = $('#tutorProfileBtn');
+  if(tutorProfileBtn) tutorProfileBtn.onclick = () => { tutorProfileModalOpen = true; render(); };
+  const tutorProfileCloseBtn = $('#tutorProfileCloseBtn');
+  if(tutorProfileCloseBtn) tutorProfileCloseBtn.onclick = () => { tutorProfileModalOpen = false; render(); };
+  const tutorProfileOverlay = $('#tutorProfileOverlay');
+  if(tutorProfileOverlay) tutorProfileOverlay.onclick = (e) => { if(e.target.id==='tutorProfileOverlay'){ tutorProfileModalOpen = false; render(); } };
+
   const logoutBtn = $('#logoutBtn');
   if(logoutBtn) logoutBtn.onclick = async () => {
     stopChatPolling();
     chatStagedFile = null;
+    tutorProfileModalOpen = false;
     stopApplicationsPolling();
     stopSignupsPolling();
     stopDevicePolling();
