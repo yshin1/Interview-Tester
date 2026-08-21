@@ -22,18 +22,35 @@ self.addEventListener('push', (event) => {
     body: data.body || '',
     icon: 'icon-192.png',
     badge: 'icon-192.png',
-    // A fresh tag per push so a second message while the first
-    // notification is still showing doesn't silently get swallowed instead
-    // of appearing on its own — same reasoning as the in-page notification
-    // tagging fix.
-    tag: 'push-' + (data.bookingId || 'unknown') + '-' + Date.now(),
+    // Same tag per booking (no timestamp) so a second message while the
+    // first notification is still showing UPDATES it in place instead of
+    // stacking a separate one — renotify:true keeps the alert/vibration
+    // firing on every update even though the tag matches.
+    tag: 'chat-' + (data.bookingId || 'unknown'),
+    renotify: true,
     data: { bookingId: data.bookingId || null }
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  // App icon badge (the little number on the home-screen icon) — only
+  // does anything on platforms that support the Badging API from a
+  // service worker (iOS/iPadOS 16.4+ when installed to Home Screen).
+  // Android Chrome has no such API; Android instead auto-badges based on
+  // how many notifications are currently showing, which is why grouping
+  // to one notification above and badging here can show different counts
+  // there — nothing to fix, just how the two platforms work.
+  const badgePromise = (typeof data.badgeCount === 'number' && self.navigator && 'setAppBadge' in self.navigator)
+    ? self.navigator.setAppBadge(data.badgeCount).catch(() => {})
+    : Promise.resolve();
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    badgePromise
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (self.navigator && 'clearAppBadge' in self.navigator) {
+    self.navigator.clearAppBadge().catch(() => {});
+  }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for(const client of clientList){
