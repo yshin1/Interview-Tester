@@ -884,6 +884,13 @@ let calShowSecondDemo = true;
 let datesMonthOffset = 0;
 let editingBooking = null;   // booking object being reassigned by admin
 let chatTarget = null;       // booking whose chat modal is open (admin side)
+// Snapshot of lastReadByAdmin taken at the moment admin opens a chat —
+// used (instead of the live, constantly-updating field) to decide which
+// applicant messages get an unread "1" badge, so that badge doesn't
+// disappear mid-session the instant markChatReadByAdmin() fires just
+// because admin opened the thread, before they've actually scrolled up
+// and looked at each message.
+let chatAdminReadCutoffAtOpen = null;
 let editDate = null, editTime = null, editError = '';
 let codeChangeState = { newApplicant:'', newExistingTutor:'', error:'', success:'', busy:false };
 let capacityDraft = null;
@@ -1299,22 +1306,14 @@ function renderChatFileAttachment(m){
   }
   return `<a href="${escapeHtml(m.fileUrl)}" target="_blank" rel="noopener" class="chat-file-link" style="display:flex; align-items:center; gap:6px; margin-top:6px; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.06); text-decoration:none; color:inherit; font-size:12.5px;">📎 ${escapeHtml(name)}</a>`;
 }
-function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, theirName){
+function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, theirName, lastReadByAdmin){
   const msgs = messages || [];
   if(msgs.length === 0){
     return `<div class="chat-empty">No messages yet. Say hello!</div>`;
   }
   const canDelete = viewerRole === 'admin';
-  // Only the LAST message admin sent gets an unread badge — matching how
-  // most chat apps (KakaoTalk included) only mark the latest message,
-  // since everything before it gets read together anyway.
-  let lastAdminMsgIndex = -1;
-  if(viewerRole === 'admin'){
-    for(let i = msgs.length - 1; i >= 0; i--){
-      if(msgs[i].from === 'admin'){ lastAdminMsgIndex = i; break; }
-    }
-  }
-  const readCutoff = lastReadByApplicant ? new Date(lastReadByApplicant) : null;
+  const applicantReadCutoff = lastReadByApplicant ? new Date(lastReadByApplicant) : null;
+  const adminReadCutoff = lastReadByAdmin ? new Date(lastReadByAdmin) : null;
 
   return msgs.map((m, i) => {
     if(m.from === 'system'){
@@ -1323,9 +1322,17 @@ function renderChatThread(messages, viewerRole, bookingId, lastReadByApplicant, 
     const mine = m.from === viewerRole;
     const who = m.from === 'admin' ? 'Admin' : (theirName || 'Applicant');
     const time = new Date(m.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    // Admin sees a "1" on every admin message the applicant hasn't read yet
+    // (a read-receipt, same as before) AND on every applicant message admin
+    // hasn't read yet — the latter matters because scrolling through the
+    // thread to answer one flagged message could otherwise look like every
+    // applicant message above it was already seen, when it wasn't.
     let unreadBadge = '';
-    if(i === lastAdminMsgIndex){
-      const seen = readCutoff && new Date(m.at) <= readCutoff;
+    if(viewerRole === 'admin' && m.from === 'admin'){
+      const seen = applicantReadCutoff && new Date(m.at) <= applicantReadCutoff;
+      if(!seen) unreadBadge = `<span class="chat-unread-badge">1</span>`;
+    } else if(viewerRole === 'admin' && m.from === 'applicant'){
+      const seen = adminReadCutoff && new Date(m.at) <= adminReadCutoff;
       if(!seen) unreadBadge = `<span class="chat-unread-badge">1</span>`;
     }
     const bubble = `<div class="chat-bubble ${mine?'mine':'theirs'}">
@@ -1380,6 +1387,20 @@ async function markChatReadByApplicant(bookingId){
   // a stale badge number would linger even after everything's been read.
   if(typeof navigator !== 'undefined' && 'clearAppBadge' in navigator){
     navigator.clearAppBadge().catch(()=>{});
+  }
+  // Also closes any still-showing push notification for this booking.
+  // Matters because Android only re-vibrates/re-sounds a grouped (same-tag)
+  // notification when it's genuinely NEW rather than an update to one
+  // that's still on screen — so proactively closing it here means the
+  // *next* message after this one is guaranteed to alert normally instead
+  // of silently updating an unread notification the user never dismissed.
+  if(typeof navigator !== 'undefined' && 'serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(reg => {
+      if(!reg.getNotifications) return;
+      return reg.getNotifications({ tag: 'chat-' + bookingId });
+    }).then(notifs => {
+      (notifs || []).forEach(n => n.close());
+    }).catch(()=>{});
   }
 }
 
@@ -3051,7 +3072,7 @@ function renderChatPanel(bookingId, viewerRole){
   const theirName = b ? (b.adminChatLabel || b.fullName) : null;
   return `
   <div class="chat-panel">
-    <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName)}</div>
+    <div class="chat-thread" id="chatThread">${renderChatThread(messages, viewerRole, bookingId, b ? b.lastReadByApplicant : null, theirName, chatAdminReadCutoffAtOpen)}</div>
     <div id="chatAttachStatus" style="font-size:11.5px; color:var(--slate-light); min-height:14px; margin:2px 2px 0;"></div>
     ${chatStagedFile ? `
     <div style="display:flex; align-items:center; gap:8px; padding:8px 10px; margin:0 2px 6px; background:rgba(0,0,0,0.05); border-radius:8px; font-size:12.5px;">
@@ -6213,6 +6234,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -6295,6 +6317,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -6355,6 +6378,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -6396,6 +6420,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -6472,6 +6497,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -6485,6 +6511,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText='';
           render();
           await markChatReadByAdmin(id);
@@ -6641,6 +6668,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText='';
           render();
           await markChatReadByAdmin(id);
@@ -7231,6 +7259,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -7263,6 +7292,7 @@ Langdy Team`;
         el.onclick = async () => {
           const id = el.dataset.chatId;
           chatTarget = bookings.find(b=>b.id===id);
+          chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
@@ -7358,8 +7388,8 @@ Langdy Team`;
           render();
         };
       });
-      $('#chatModalCloseBtn').onclick = () => { stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; render(); };
-      $('#chatModalOverlay').onclick = (e) => { if(e.target.id==='chatModalOverlay'){ stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; render(); } };
+      $('#chatModalCloseBtn').onclick = () => { stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; chatAdminReadCutoffAtOpen=null; render(); };
+      $('#chatModalOverlay').onclick = (e) => { if(e.target.id==='chatModalOverlay'){ stopChatPolling(); chatDraftText=''; chatStagedFile=null; chatTarget=null; chatAdminReadCutoffAtOpen=null; render(); } };
       startChatPolling(chatTarget.id, async () => {
         if(chatTarget){
           const fresh = bookings.find(b=>b.id===chatTarget.id);
@@ -7399,6 +7429,7 @@ Langdy Team`;
         const id = editingSecondDemo.id;
         editingSecondDemo = null;
         chatTarget = bookings.find(b=>b.id===id);
+        chatAdminReadCutoffAtOpen = chatTarget ? chatTarget.lastReadByAdmin : null;
         chatDraftText = '';
         render();
         await markChatReadByAdmin(id);
