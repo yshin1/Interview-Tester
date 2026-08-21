@@ -918,21 +918,8 @@ let chatTarget = null;       // booking whose chat modal is open (admin side)
 let chatAdminReadCutoffAtOpen = null;
 let editDate = null, editTime = null, editError = '';
 let codeChangeState = { newApplicant:'', newExistingTutor:'', error:'', success:'', busy:false };
-let tutorSignupCodeAdmin = null; // loaded on-demand for admin's Settings > Codes view; null until loaded
-let applicantCodeAdmin = null; // same, for the applicant/1st-demo code
+let applicantCodeAdmin = null; // loaded on-demand for admin's Settings > Codes view; null until loaded
 let verifiedApplicantCode = ''; // the code the gate screen confirmed valid — threaded through to createBooking
-let tutorInvites = []; // per-tutor single-use sign-up invites, loaded on-demand for Settings > Codes
-let codesTutorInvitesLoaded = false;
-let tutorInviteDraft = { fullName: '', email: '', busy: false, error: '' };
-async function loadTutorInvites(){
-  try{
-    const snap = await db.collection('tutorInvites').get();
-    tutorInvites = snap.docs.map(d => Object.assign({ id: d.id }, d.data()))
-      .sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
-  }catch(e){
-    console.error('Failed to load tutor invites:', e);
-  }
-}
 let capacityDraft = null;
 let capacityDayTab = 1; // 1=Mon .. 5=Fri
 let capacitySaving = false;
@@ -1159,21 +1146,8 @@ async function findBookingByEmail(email){
   const result = await callable({ email });
   return result.data && result.data.booking ? result.data.booking : null;
 }
-// Verifies the tutor sign-up access code server-side (see verifyTutorSignupCode
-// in functions/index.js) — the real code value is never sent to or readable
-// by the client, only a pass/fail.
-async function verifyTutorSignupCode(code){
-  const callable = fbFunctions.httpsCallable('verifyTutorSignupCode');
-  const result = await callable({ code });
-  return !!(result.data && result.data.valid);
-}
-// Admin-only: loads the actual current sign-up code for display/editing in
-// Settings. Reads adminSecrets/tutorSignup directly (allowed only for admin
-// per firestore.rules) rather than through a Cloud Function, since here —
-// unlike verifyTutorSignupCode — the caller is already authenticated as
-// admin and is SUPPOSED to see the real value.
-// Verifies the applicant/1st-demo access code server-side — same pattern
-// as verifyTutorSignupCode, real value never sent to the client.
+// Verifies the applicant/1st-demo access code server-side — real value
+// never sent to the client.
 async function verifyApplicantCode(code){
   const callable = fbFunctions.httpsCallable('verifyApplicantCode');
   const result = await callable({ code });
@@ -1186,15 +1160,6 @@ async function loadApplicantCodeForAdmin(){
   }catch(e){
     console.error('Failed to load applicant code:', e);
     applicantCodeAdmin = null;
-  }
-}
-async function loadTutorSignupCodeForAdmin(){
-  try{
-    const snap = await db.collection('adminSecrets').doc('tutorSignup').get();
-    tutorSignupCodeAdmin = snap.exists ? (snap.data().code || '') : 'TUTOR2026';
-  }catch(e){
-    console.error('Failed to load tutor sign-up code:', e);
-    tutorSignupCodeAdmin = null;
   }
 }
 async function loadBookings(){
@@ -2309,7 +2274,6 @@ let tutorLoginEmail = '';
 let tutorLoginError = '';
 let tutorLoginBusy = false;
 let tutorForgotPasswordState = { email: '', error: '', success: '', busy: false };
-let tutorSignupDraft = { code: '', fullName: '', tutorName: '', email: '', password: '', error: '', busy: false };
 let changePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorChangePasswordState = { currentPassword:'', newPassword:'', confirmPassword:'', error:'', success:'', busy:false };
 let tutorNameEditState = { value:'', error:'', success:'', busy:false };
@@ -2382,44 +2346,6 @@ function renderGate(){
         ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
         ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
         <button class="find-link" id="gateSwitchToTutorLoginFromForgot" style="display:block; margin-top:14px;">← Back to sign in</button>
-      </div>
-    </div>`;
-  }
-  if(gateMode === 'tutorSignup'){
-    const d = tutorSignupDraft;
-    return `
-    <div class="center-screen">
-      <div class="card gate-card">
-        <div class="brand-mark" style="margin-bottom:16px;">L</div>
-        <h1 class="gate-title">Tutor Sign Up</h1>
-        <p class="gate-sub">For tutors already working with us who don't have a chat account yet. You'll need the access code shared with the team.</p>
-        <div class="field">
-          <label for="tutorSignupCodeInput">Access Code</label>
-          <input type="text" id="tutorSignupCodeInput" placeholder="Access code" autocomplete="off" value="${escapeHtml(d.code)}" ${d.busy?'disabled':''}>
-        </div>
-        <div class="field">
-          <label for="tutorSignupNameInput">Full Name</label>
-          <input type="text" id="tutorSignupNameInput" placeholder="Your name" autocomplete="name" value="${escapeHtml(d.fullName)}" ${d.busy?'disabled':''}>
-        </div>
-        <div class="field">
-          <label for="tutorSignupTutorNameInput">Tutor Name <span style="color:var(--slate-light); font-weight:400;">(the name shown to students)</span></label>
-          <input type="text" id="tutorSignupTutorNameInput" placeholder="e.g. Amy" value="${escapeHtml(d.tutorName)}" ${d.busy?'disabled':''}>
-        </div>
-        <div class="field">
-          <label for="tutorSignupEmailInput">Email</label>
-          <input type="email" id="tutorSignupEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(d.email)}" ${d.busy?'disabled':''}>
-        </div>
-        <div class="field">
-          <label for="tutorSignupPasswordInput">Choose a Password</label>
-          <input type="password" id="tutorSignupPasswordInput" placeholder="At least 6 characters" autocomplete="new-password" ${d.busy?'disabled':''}>
-        </div>
-        <div class="field">
-          <label for="tutorSignupPasswordConfirmInput">Confirm Password</label>
-          <input type="password" id="tutorSignupPasswordConfirmInput" placeholder="Re-enter your password" autocomplete="new-password" ${d.busy?'disabled':''}>
-        </div>
-        <button class="btn btn-primary" id="tutorSignupSubmit" ${d.busy?'disabled':''}>${d.busy?'Creating account…':'Create Account'}</button>
-        ${d.error ? `<div class="error-text">${escapeHtml(d.error)}</div>` : ''}
-        <button class="find-link" id="gateSwitchToTutorLoginFromSignup" style="display:block; margin-top:14px;">Already have an account? Sign in</button>
       </div>
     </div>`;
   }
@@ -4256,26 +4182,17 @@ let tutorChatLabelDraft = '';
 // record (no actual demo date/time) marked as having passed the 2nd demo,
 // so the exact same invite flow used for everyone else works unchanged —
 // then immediately fires that invite instead of making admin hunt the new
-// record down in a list first. Also supports pasting many at once (e.g.
-// copied straight out of a spreadsheet).
+// record down in a list first. One unified multi-row form handles both a
+// single person and many at once — empty rows are just ignored on submit,
+// so filling in just row 1 works the same as it used to for "add one".
 let addExistingTutorModalOpen = false;
-let addExistingTutorDraft = { fullName: '', email: '', bulkText: '', error: '', busy: false };
+function freshExistingTutorRow(){ return { fullName: '', tutorName: '', email: '' }; }
+let addExistingTutorDraft = { rows: [freshExistingTutorRow(), freshExistingTutorRow(), freshExistingTutorRow()], error: '', busy: false };
 // Set once bulk processing finishes — an array of
 // {fullName, email, success, tempPassword, error}. Rendering switches to a
 // results view showing per-person invite buttons instead of auto-opening
 // every Gmail compose window at once, which browsers block as popups.
 let addExistingTutorResults = null;
-
-function parseBulkTutorLines(text){
-  return (text||'').split('\n').map(line => line.trim()).filter(Boolean).map(line => {
-    // Accept comma- or tab-separated "Name, email" — tab-separated is what
-    // you get pasting two spreadsheet columns directly.
-    const parts = line.includes('\t') ? line.split('\t') : line.split(',');
-    const fullName = (parts[0]||'').trim();
-    const email = (parts[1]||'').trim();
-    return { raw: line, fullName, email };
-  });
-}
 
 function renderAddExistingTutorModal(){
   const d = addExistingTutorDraft;
@@ -4300,7 +4217,7 @@ function renderAddExistingTutorModal(){
       <div class="modal" style="max-width:480px; max-height:82vh; overflow:auto;">
         <h3>Accounts Created</h3>
         <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">${successCount} of ${addExistingTutorResults.length} account(s) created. Click each person's button below to open their invite email one at a time (opening them all automatically gets blocked as popups).</p>
-        ${hitRateLimit ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⏳</div><div class="txt">Firebase limits new account creation to 100 per hour from this connection. The rest weren't attempted — paste their names again in about an hour to finish.</div></div>` : ''}
+        ${hitRateLimit ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⏳</div><div class="txt">Firebase limits new account creation to 100 per hour from this connection. The rest weren't attempted — fill the form again in about an hour to finish.</div></div>` : ''}
         ${rows}
         <div class="modal-actions">
           <button class="btn btn-primary" id="addExistingTutorDoneBtn">Done</button>
@@ -4309,33 +4226,34 @@ function renderAddExistingTutorModal(){
     </div>`;
   }
 
+  const rowsHtml = d.rows.map((row, i) => `
+    <div style="display:flex; gap:6px; align-items:flex-end; margin-bottom:8px;">
+      <div class="field" style="margin:0; flex:1; min-width:0;">
+        ${i===0 ? '<label style="font-size:11px;">Full Name</label>' : ''}
+        <input type="text" data-etrow-fullname="${i}" value="${escapeHtml(row.fullName)}" placeholder="e.g. Kim Jiwon" ${d.busy?'disabled':''}>
+      </div>
+      <div class="field" style="margin:0; flex:1; min-width:0;">
+        ${i===0 ? '<label style="font-size:11px;">Tutor Name <span style="color:var(--slate-light); font-weight:400;">(shown to students)</span></label>' : ''}
+        <input type="text" data-etrow-tutorname="${i}" value="${escapeHtml(row.tutorName)}" placeholder="e.g. Amy" ${d.busy?'disabled':''}>
+      </div>
+      <div class="field" style="margin:0; flex:1.3; min-width:0;">
+        ${i===0 ? '<label style="font-size:11px;">Email</label>' : ''}
+        <input type="email" data-etrow-email="${i}" value="${escapeHtml(row.email)}" placeholder="name@example.com" ${d.busy?'disabled':''}>
+      </div>
+      ${d.rows.length > 1 ? `<button type="button" class="btn btn-ghost btn-sm" data-etrow-remove="${i}" style="width:auto; padding:9px 10px; color:var(--danger);" ${d.busy?'disabled':''} title="Remove row">✕</button>` : ''}
+    </div>`).join('');
+
   return `
   <div class="modal-overlay" id="addExistingTutorOverlay">
-    <div class="modal" style="max-width:480px; max-height:82vh; overflow:auto;">
+    <div class="modal" style="max-width:600px; max-height:82vh; overflow:auto;">
       <h3>Add Existing Tutor</h3>
-      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">For tutors already working with us who never applied through this site. This creates their record and account, ready to invite.</p>
+      <p style="font-size:12.5px; color:var(--slate); margin:-6px 0 12px; line-height:1.6;">For tutors already working with us who never applied through this site. Fill in one row per person — this creates their record and account, then sends each an invite email.</p>
       ${d.error ? `<div class="warn-box strong" style="margin-bottom:12px;"><div class="icon">⚠️</div><div class="txt">${escapeHtml(d.error)}</div></div>` : ''}
-      <div class="field">
-        <label>Full Name</label>
-        <input type="text" id="addExistingTutorName" value="${escapeHtml(d.fullName)}" placeholder="e.g. Amy">
-      </div>
-      <div class="field">
-        <label>Email Address</label>
-        <input type="email" id="addExistingTutorEmail" value="${escapeHtml(d.email)}" placeholder="name@example.com">
-      </div>
+      ${rowsHtml}
+      <button type="button" class="btn btn-ghost btn-sm" id="addExistingTutorAddRowBtn" style="width:auto; padding:8px 14px; margin-bottom:14px;" ${d.busy?'disabled':''}>+ Add another row</button>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="addExistingTutorCancelBtn" ${d.busy?'disabled':''}>Cancel</button>
-        <button class="btn btn-primary" id="addExistingTutorSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Sending invite…':'Add & Send Invite'}</button>
-      </div>
-      <div class="divider"></div>
-      <div class="field">
-        <label>— or add several at once —</label>
-        <div style="font-size:11.5px; color:var(--slate-light); margin:-2px 0 6px;">One person per line: Name, email — or paste two columns straight from a spreadsheet.</div>
-        <textarea id="addExistingTutorBulkText" rows="5" placeholder="Amy Kim, amy@example.com
-Bob Lee, bob@example.com" style="resize:vertical; min-height:100px;">${escapeHtml(d.bulkText)}</textarea>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-primary" id="addExistingTutorBulkSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Processing…':'Add All'}</button>
+        <button class="btn btn-primary" id="addExistingTutorSubmitBtn" ${d.busy?'disabled':''}>${d.busy?'Processing…':'Add & Send Invites'}</button>
       </div>
     </div>
   </div>`;
@@ -5102,14 +5020,11 @@ function renderAdminAccountSection(){
 
 function renderAdminCodes(){
   const s = codeChangeState;
-  const d = tutorInviteDraft;
-  const pendingInvites = tutorInvites.filter(t => !t.used);
-  const usedInvites = tutorInvites.filter(t => t.used);
   return `
   ${renderAdminAccountSection()}
   <div class="card">
-    <div class="section-title">Applicant Access Code (admin testing)</div>
-    <div class="section-desc">A reusable fallback code, mainly for admin's own testing — real invites go out per-person now with their own single-use code, from the <strong>Applications</strong> tab's Invite button. Admin-only, not readable from the public config.</div>
+    <div class="section-title">Applicant Access Code</div>
+    <div class="section-desc">Shared privately with candidates who passed the application, so they can book their 1st demo interview slot. Admin-only, not readable from the public config — anyone who knows it can book a slot.</div>
 
     <div class="field">
       <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${applicantCodeAdmin==null?'loading…':escapeHtml(applicantCodeAdmin)})</span></label>
@@ -5118,47 +5033,6 @@ function renderAdminCodes(){
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
     ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
-  </div>
-  <div class="card">
-    <div class="section-title">Existing Tutor Sign-Up Code (admin testing)</div>
-    <div class="section-desc">A reusable fallback code for admin's own testing of the sign-up flow. Real tutor invites should use the per-person codes below instead — this always works but isn't tied to anyone specific.</div>
-
-    <div class="field">
-      <label>New Sign-Up Code <span style="color:var(--slate-light); font-weight:400;">(current: ${tutorSignupCodeAdmin==null?'loading…':escapeHtml(tutorSignupCodeAdmin)})</span></label>
-      <input type="text" id="newExistingTutorCodeInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newExistingTutor)}">
-    </div>
-    <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="tutorCodeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
-  </div>
-  <div class="card">
-    <div class="section-title">Tutor Sign-Up Invites</div>
-    <div class="section-desc">Generates a single-use code for one specific tutor. Share it (plus <strong>${escapeHtml(window.location.origin + window.location.pathname)}?tutor-signup</strong>) with just that person — it stops working the moment their account is created, and won't work for anyone else.</div>
-
-    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px;">
-      <div class="field" style="margin:0; flex:1; min-width:160px;">
-        <label>Tutor's Name</label>
-        <input type="text" id="tutorInviteNameInput" placeholder="e.g. Amy" value="${escapeHtml(d.fullName)}" ${d.busy?'disabled':''}>
-      </div>
-      <div class="field" style="margin:0; flex:1; min-width:200px;">
-        <label>Email</label>
-        <input type="email" id="tutorInviteEmailInput" placeholder="tutor@example.com" value="${escapeHtml(d.email)}" ${d.busy?'disabled':''}>
-      </div>
-      <button class="btn btn-primary" style="width:auto; padding:11px 22px;" id="tutorInviteGenerateBtn" ${d.busy?'disabled':''}>${d.busy?'Generating…':'Generate & Email'}</button>
-    </div>
-    ${d.error ? `<div class="error-text">${escapeHtml(d.error)}</div>` : ''}
-
-    ${pendingInvites.length ? `
-    <div class="section-title" style="font-size:13px; margin-top:18px;">Pending (${pendingInvites.length})</div>
-    <table class="list-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Code</th><th></th></tr></thead>
-      <tbody>${pendingInvites.map(t => `
-      <tr>
-        <td>${escapeHtml(t.fullName||'—')}</td>
-        <td>${escapeHtml(t.email)}</td>
-        <td><code>${escapeHtml(t.code)}</code></td>
-        <td><button class="btn btn-ghost btn-sm" data-delete-tutor-invite="${t.id}" style="width:auto; padding:6px 12px; color:var(--danger);">Revoke</button></td>
-      </tr>`).join('')}</tbody>
-    </table>` : ''}
-    ${usedInvites.length ? `<div class="section-desc" style="margin-top:14px;">${usedInvites.length} invite${usedInvites.length===1?'':'s'} already used.</div>` : ''}
   </div>`;
 }
 
@@ -5726,63 +5600,6 @@ function attachHandlers(){
       $('#tutorForgotEmailInput').focus();
       const backToLoginLink = $('#gateSwitchToTutorLoginFromForgot');
       if(backToLoginLink) backToLoginLink.onclick = () => { gateMode='tutorLogin'; render(); };
-    } else if(gateMode==='tutorSignup'){
-      const submit = async () => {
-        const d = tutorSignupDraft;
-        const code = $('#tutorSignupCodeInput').value.trim();
-        const fullName = $('#tutorSignupNameInput').value.trim();
-        const tutorName = $('#tutorSignupTutorNameInput').value.trim();
-        const email = $('#tutorSignupEmailInput').value.trim();
-        const password = $('#tutorSignupPasswordInput').value;
-        const passwordConfirm = $('#tutorSignupPasswordConfirmInput').value;
-        d.code = code; d.fullName = fullName; d.tutorName = tutorName; d.email = email;
-
-        if(!fullName){
-          d.error = 'Please enter your full name.'; render(); return;
-        }
-        if(!tutorName){
-          d.error = 'Please enter your tutor name.'; render(); return;
-        }
-        if(!isValidEmail(email)){
-          d.error = 'Please enter a valid email address.'; render(); return;
-        }
-        if(!password || password.length < 6){
-          d.error = 'Password must be at least 6 characters.'; render(); return;
-        }
-        if(password !== passwordConfirm){
-          d.error = 'Passwords do not match.'; render(); return;
-        }
-
-        d.busy = true; d.error = ''; render();
-        try{
-          // The access code check, the account creation, and the booking
-          // record now all happen together server-side (see signUpAsTutor
-          // in functions/index.js) — this used to be a plain client-side
-          // Firestore write plus createUserWithEmailAndPassword, which
-          // meant the code was never actually enforced and a single-use
-          // invite couldn't be safely consumed exactly once.
-          const callable = fbFunctions.httpsCallable('signUpAsTutor');
-          await callable({ code, fullName, tutorName, email, password });
-          // Sign in now that the account genuinely exists — this fires
-          // onAuthStateChanged (set up in init), which finds the booking
-          // just created above and switches straight to the chat view.
-          await firebase.auth().signInWithEmailAndPassword(email, password);
-        }catch(e){
-          console.error('TUTOR SIGNUP ERROR:', e);
-          d.busy = false;
-          d.error = (e.message || 'Something went wrong creating your account. Please try again.');
-          render();
-        }
-      };
-      $('#tutorSignupSubmit').onclick = submit;
-      $('#tutorSignupPasswordInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-      $('#tutorSignupPasswordConfirmInput').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
-      $('#tutorSignupCodeInput').oninput = e => { tutorSignupDraft.code = e.target.value; };
-      $('#tutorSignupNameInput').oninput = e => { tutorSignupDraft.fullName = e.target.value; };
-      $('#tutorSignupTutorNameInput').oninput = e => { tutorSignupDraft.tutorName = e.target.value; };
-      $('#tutorSignupEmailInput').oninput = e => { tutorSignupDraft.email = e.target.value; };
-      const signupBackLink = $('#gateSwitchToTutorLoginFromSignup');
-      if(signupBackLink) signupBackLink.onclick = () => { gateMode='tutorLogin'; tutorSignupDraft={ code:'', fullName:'', tutorName:'', email:'', password:'', error:'', busy:false }; render(); };
     } else {
       const submit = async () => {
         const email = $('#findEmailInput').value.trim();
@@ -7071,8 +6888,6 @@ Langdy Team`;
 
     if(adminTab==='codes'){
       if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
-      if(tutorSignupCodeAdmin === null) loadTutorSignupCodeForAdmin().then(render);
-      if(!codesTutorInvitesLoaded){ codesTutorInvitesLoaded = true; loadTutorInvites().then(render); }
       $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
       $('#codeSaveBtn').onclick = async () => {
         const s = codeChangeState;
@@ -7087,69 +6902,6 @@ Langdy Team`;
         s.busy=false; s.success='Applicant code updated successfully.'; s.newApplicant='';
         render();
       };
-
-      $('#newExistingTutorCodeInput').oninput = e => { codeChangeState.newExistingTutor = e.target.value; };
-      $('#tutorCodeSaveBtn').onclick = async () => {
-        const s = codeChangeState;
-        s.error=''; s.success='';
-        if(!s.newExistingTutor.trim()){
-          s.error = 'Enter a new sign-up code to change.'; render(); return;
-        }
-        s.busy = true; render();
-        const newCode = s.newExistingTutor.trim();
-        await db.collection('adminSecrets').doc('tutorSignup').set({ code: newCode });
-        tutorSignupCodeAdmin = newCode;
-        s.busy=false; s.success='Existing tutor sign-up code updated successfully.'; s.newExistingTutor='';
-        render();
-      };
-
-      const tiNameInput = $('#tutorInviteNameInput');
-      if(tiNameInput) tiNameInput.oninput = e => { tutorInviteDraft.fullName = e.target.value; };
-      const tiEmailInput = $('#tutorInviteEmailInput');
-      if(tiEmailInput) tiEmailInput.oninput = e => { tutorInviteDraft.email = e.target.value; };
-      const tiGenerateBtn = $('#tutorInviteGenerateBtn');
-      if(tiGenerateBtn) tiGenerateBtn.onclick = async () => {
-        const d = tutorInviteDraft;
-        d.error = '';
-        const fullName = d.fullName.trim();
-        const email = d.email.trim();
-        if(!fullName){ d.error = 'Enter the tutor\'s name.'; render(); return; }
-        if(!isValidEmail(email)){ d.error = 'Enter a valid email address.'; render(); return; }
-        d.busy = true; render();
-        const code = generateInviteCode();
-        try{
-          await db.collection('tutorInvites').add({ fullName, email, code, used:false, createdAt: new Date().toISOString() });
-          const subject = "You're invited to create your tutor account — Langdy";
-          const body = `Hi ${fullName},
-
-You can now create your own chat login. Use the access code below:
-
-Access Code: ${code}
-
-Sign-up link: ${window.location.origin + window.location.pathname}?tutor-signup
-
-This code is just for you and works once.
-
-Best,
-Langdy Team`;
-          window.open(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
-          await loadTutorInvites();
-          d.fullName=''; d.email=''; d.busy=false;
-          render();
-        }catch(e){
-          console.error('Failed to create tutor invite:', e);
-          d.busy=false; d.error='Something went wrong creating the invite. Please try again.';
-          render();
-        }
-      };
-      $$('[data-delete-tutor-invite]').forEach(el=>{
-        el.onclick = async () => {
-          const id = el.dataset.deleteTutorInvite;
-          await db.collection('tutorInvites').doc(id).delete();
-          tutorInvites = tutorInvites.filter(t => t.id !== id);
-          render();
-        };
-      });
 
       $('#cpCurrentInput').oninput = e => { changePasswordState.currentPassword = e.target.value; };
       $('#cpNewInput').oninput = e => { changePasswordState.newPassword = e.target.value; };
@@ -7306,20 +7058,22 @@ Langdy Team`;
       const closeModal = () => {
         addExistingTutorModalOpen = false;
         addExistingTutorResults = null;
-        addExistingTutorDraft = { fullName: '', email: '', bulkText: '', error: '', busy: false };
+        addExistingTutorDraft = { rows: [freshExistingTutorRow(), freshExistingTutorRow(), freshExistingTutorRow()], error: '', busy: false };
         render();
       };
       $('#addExistingTutorCancelBtn') && ($('#addExistingTutorCancelBtn').onclick = closeModal);
       $('#addExistingTutorDoneBtn') && ($('#addExistingTutorDoneBtn').onclick = closeModal);
       $('#addExistingTutorOverlay').onclick = (e) => { if(e.target.id==='addExistingTutorOverlay') closeModal(); };
 
-      // Shared by both the single-add button and the bulk-add flow — creates
-      // the minimal booking record, creates the Firebase account, and
+      // Creates the minimal booking record (tutorName/adminChatLabel set up
+      // front now, instead of admin having to fix the display name by hand
+      // afterward from Tutor Chats), creates the Firebase account, and
       // returns the temp password (or throws with a friendly message).
-      const createAndInviteExistingTutor = async (fullName, email) => {
+      const createAndInviteExistingTutor = async (fullName, tutorName, email) => {
         const newId = generateSecureId('tutor');
         const newRecord = {
           id: newId, fullName, email,
+          tutorName, adminChatLabel: tutorName,
           date: null, time: null,
           secondDemoResult: 'pass',
           existingTutor: true,
@@ -7352,50 +7106,34 @@ Langdy Team`;
         return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       };
 
-      const nameInput = $('#addExistingTutorName');
-      const emailInput = $('#addExistingTutorEmail');
-      if(nameInput) nameInput.oninput = e => { addExistingTutorDraft.fullName = e.target.value; };
-      if(emailInput) emailInput.oninput = e => { addExistingTutorDraft.email = e.target.value; };
-      const bulkTextarea = $('#addExistingTutorBulkText');
-      if(bulkTextarea){
-        autoGrowTextarea(bulkTextarea);
-        bulkTextarea.oninput = e => { addExistingTutorDraft.bulkText = e.target.value; };
-      }
+      $$('[data-etrow-fullname]').forEach(el=>{
+        el.oninput = e => { addExistingTutorDraft.rows[Number(el.dataset.etrowFullname)].fullName = e.target.value; };
+      });
+      $$('[data-etrow-tutorname]').forEach(el=>{
+        el.oninput = e => { addExistingTutorDraft.rows[Number(el.dataset.etrowTutorname)].tutorName = e.target.value; };
+      });
+      $$('[data-etrow-email]').forEach(el=>{
+        el.oninput = e => { addExistingTutorDraft.rows[Number(el.dataset.etrowEmail)].email = e.target.value; };
+      });
+      $$('[data-etrow-remove]').forEach(el=>{
+        el.onclick = () => {
+          addExistingTutorDraft.rows.splice(Number(el.dataset.etrowRemove), 1);
+          render();
+        };
+      });
+      const addRowBtn = $('#addExistingTutorAddRowBtn');
+      if(addRowBtn) addRowBtn.onclick = () => { addExistingTutorDraft.rows.push(freshExistingTutorRow()); render(); };
 
       const submitBtn = $('#addExistingTutorSubmitBtn');
       if(submitBtn) submitBtn.onclick = async () => {
-        const fullName = (addExistingTutorDraft.fullName||'').trim();
-        const email = (addExistingTutorDraft.email||'').trim();
-        if(!fullName){
-          addExistingTutorDraft.error = 'Please enter their full name.'; render(); return;
-        }
-        if(!isValidEmail(email)){
-          addExistingTutorDraft.error = 'Please enter a valid email address.'; render(); return;
-        }
-        const emailNorm = email.toLowerCase();
-        if(bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
-          addExistingTutorDraft.error = 'A record with this email already exists — check Tutor Chats, Archive, or the calendar.'; render(); return;
-        }
-        addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
-        try{
-          const tempPassword = await createAndInviteExistingTutor(fullName, email);
-          window.open(buildInviteGmailUrl(fullName, email, tempPassword), '_blank');
-          closeModal();
-        }catch(e){
-          console.error('ADD EXISTING TUTOR ERROR:', e);
-          addExistingTutorDraft.busy = false;
-          addExistingTutorDraft.error = e.code === 'auth/email-already-in-use'
-            ? 'An account already exists for this email.'
-            : 'Something went wrong creating the account. Please try again.';
-          render();
-        }
-      };
-
-      const bulkSubmitBtn = $('#addExistingTutorBulkSubmitBtn');
-      if(bulkSubmitBtn) bulkSubmitBtn.onclick = async () => {
-        const parsed = parseBulkTutorLines(addExistingTutorDraft.bulkText);
-        if(parsed.length === 0){
-          addExistingTutorDraft.error = 'Paste at least one line as "Name, email".'; render(); return;
+        // Blank rows (left over from the extra starting rows, or an unused
+        // "+ Add another") are just skipped rather than treated as errors —
+        // filling in only row 1 works the same as the old single-add did.
+        const candidates = addExistingTutorDraft.rows
+          .map(r => ({ fullName: r.fullName.trim(), tutorName: r.tutorName.trim(), email: r.email.trim() }))
+          .filter(r => r.fullName || r.tutorName || r.email);
+        if(candidates.length === 0){
+          addExistingTutorDraft.error = 'Fill in at least one row.'; render(); return;
         }
         addExistingTutorDraft.busy = true; addExistingTutorDraft.error = ''; render();
         const seenInBatch = new Set();
@@ -7406,16 +7144,17 @@ Langdy Team`;
         // would fail the same way, so stop immediately instead of burning
         // through the rest of the list with the same error.
         let rateLimited = false;
-        for(const row of parsed){
+        for(const row of candidates){
           if(rateLimited){
-            results.push({ fullName: row.fullName || row.raw, email: row.email, success: false, error: "Not attempted — hourly limit reached" });
+            results.push({ fullName: row.fullName || row.email, email: row.email, success: false, error: "Not attempted — hourly limit reached" });
             continue;
           }
           const fullName = row.fullName;
-          const email = row.email.trim();
+          const tutorName = row.tutorName || row.fullName;
+          const email = row.email;
           const emailNorm = email.toLowerCase();
           if(!fullName || !isValidEmail(email)){
-            results.push({ fullName: fullName || row.raw, email, success: false, error: 'Missing name or invalid email' });
+            results.push({ fullName: fullName || email, email, success: false, error: 'Missing name or invalid email' });
             continue;
           }
           if(seenInBatch.has(emailNorm) || bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm)){
@@ -7424,10 +7163,10 @@ Langdy Team`;
           }
           seenInBatch.add(emailNorm);
           try{
-            const tempPassword = await createAndInviteExistingTutor(fullName, email);
+            const tempPassword = await createAndInviteExistingTutor(fullName, tutorName, email);
             results.push({ fullName, email, success: true, tempPassword });
           }catch(e){
-            console.error('BULK ADD EXISTING TUTOR ERROR:', fullName, email, e);
+            console.error('ADD EXISTING TUTOR ERROR:', fullName, email, e);
             if(e.code === 'auth/too-many-requests'){
               rateLimited = true;
               results.push({ fullName, email, success: false, error: "Hourly account-creation limit reached — try again in about an hour" });
@@ -7674,7 +7413,6 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
   else if(params.has('device')) view = 'deviceForm';
   else if(params.has('admin')){ gateMode = 'adminLogin'; cameFromAdminLink = true; }
   else if(params.has('tutor')){ gateMode = 'tutorLogin'; cameFromTutorLink = true; }
-  else if(params.has('tutor-signup')){ gateMode = 'tutorSignup'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
   // If this browser has a remembered still-applicant booking (from a
