@@ -2300,8 +2300,8 @@ function showNotionSelectOverlay(rows){
 function render(){
   const app = document.getElementById('app');
   if(view==='apply') app.innerHTML = renderApplyPage();
-  else if(view==='signupForm') app.innerHTML = renderSignupFormPage();
-  else if(view==='deviceForm') app.innerHTML = renderDeviceFormPage();
+  else if(view==='signupForm') app.innerHTML = currentTutorUser ? renderSignupFormPage() : renderTutorLoginGate('signup');
+  else if(view==='deviceForm') app.innerHTML = currentTutorUser ? renderDeviceFormPage() : renderTutorLoginGate('device');
   else if(view==='gate') app.innerHTML = renderGate();
   else if(view==='book') app.innerHTML = renderTopbar(currentTutorUser ? 'tutor' : 'applicant') + renderBook() + (tutorProfileModalOpen ? renderTutorProfileModal() : '');
   else if(view==='admin') app.innerHTML = renderTopbar('admin') + renderAdmin();
@@ -2522,6 +2522,9 @@ function renderDynamicField(formKey, field, value, fileName, previewUrl){
     case 'textarea': // legacy alias — renders identically to 'text' now that the two are merged
       return `<div class="field form-question">${labelBlock}<textarea id="${idAttr}" rows="1" class="auto-grow-textarea" style="resize:vertical; min-height:44px; height:44px; overflow:hidden;">${escapeHtml(value||'')}</textarea></div>`;
     case 'email':
+      if((formKey === 'signup' || formKey === 'device') && field.id === 'email' && currentTutorUser){
+        return `<div class="field form-question">${labelBlock}<input type="email" id="${idAttr}" value="${escapeHtml(currentTutorUser.email||'')}" readonly style="background:var(--paper-2); color:var(--slate);"><div style="font-size:11px; color:var(--slate-light); margin-top:4px;">Locked to the account you're signed in as.</div></div>`;
+      }
       return `<div class="field form-question">${labelBlock}<input type="email" id="${idAttr}" placeholder="name@example.com" value="${escapeHtml(value||'')}"></div>`;
     case 'select':
       return `<div class="field form-question">${labelBlock}<select id="${idAttr}"><option value="">Select…</option>${(field.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${value===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
@@ -2667,6 +2670,35 @@ function renderApplyDone(){
 /* ============================================================
    Account Signup (Account Creation) form
    ============================================================ */
+// Gates the Account Signup and Device Submission forms behind tutor
+// login — these carry the most sensitive uploads (government ID photos,
+// self-intro recordings, KakaoTalk screenshots), so unlike the Apply form,
+// access is tied to a real signed-in account instead of just an
+// unguessable link. Fits the existing workflow: admin already creates the
+// tutor's login account and sends it BEFORE these forms get filled out,
+// so requiring sign-in here doesn't add a new step, just moves it earlier.
+function renderTutorLoginGate(formKey){
+  const label = formKey === 'signup' ? 'Account Signup' : 'Device Submission';
+  return `
+  <div class="center-screen">
+    <div class="card gate-card">
+      <div class="brand-mark" style="margin-bottom:16px;">L</div>
+      <h1 class="gate-title">Sign In Required</h1>
+      <p class="gate-sub">The ${label} form is only available once you're signed in — use the login info admin sent you.</p>
+      <div class="field">
+        <label for="gsfLoginEmail">Email</label>
+        <input type="email" id="gsfLoginEmail" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(tutorLoginEmail)}" ${tutorLoginBusy?'disabled':''}>
+      </div>
+      <div class="field">
+        <label for="gsfLoginPassword">Password</label>
+        <input type="password" id="gsfLoginPassword" placeholder="Your password" autocomplete="current-password" ${tutorLoginBusy?'disabled':''}>
+      </div>
+      <button class="btn btn-primary" id="gsfLoginSubmit" ${tutorLoginBusy?'disabled':''}>${tutorLoginBusy?'Signing in…':'Sign In'}</button>
+      ${tutorLoginError ? `<div class="error-text">${escapeHtml(tutorLoginError)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
 function renderSignupFormPage(){
   const state = dynamicFormState.signup;
   if(state.done) return renderSignupFormDone();
@@ -5582,6 +5614,33 @@ function attachHandlers(){
     };
   }
 
+  if((view==='signupForm' || view==='deviceForm') && !currentTutorUser){
+    const submit = async () => {
+      const email = $('#gsfLoginEmail').value.trim();
+      const password = $('#gsfLoginPassword').value;
+      tutorLoginEmail = email;
+      if(!isValidEmail(email)){ tutorLoginError = 'Please enter a valid email address.'; render(); return; }
+      if(!password){ tutorLoginError = 'Please enter your password.'; render(); return; }
+      tutorLoginBusy = true; tutorLoginError = ''; render();
+      cameFromTutorLink = true; // so the auth-state listener actually processes this sign-in (see its own comment)
+      try{
+        await firebase.auth().signInWithEmailAndPassword(email, password);
+        // onAuthStateChanged (set up in init) picks this up — since view is
+        // 'signupForm'/'deviceForm' it deliberately leaves view alone (see
+        // its own condition), so the next render just shows the form now
+        // that currentTutorUser is set.
+      }catch(e){
+        tutorLoginBusy = false;
+        tutorLoginError = 'Incorrect email or password.';
+        render();
+      }
+    };
+    const submitBtn = $('#gsfLoginSubmit');
+    if(submitBtn) submitBtn.onclick = submit;
+    const pwInput = $('#gsfLoginPassword');
+    if(pwInput) pwInput.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
+  }
+
   if(view==='signupForm' && !dynamicFormState.signup.done){
     const formKey = 'signup';
     const state = dynamicFormState[formKey];
@@ -5664,6 +5723,7 @@ function attachHandlers(){
           }
         }
         await Promise.all(uploadTasks);
+        record.email = currentTutorUser ? currentTutorUser.email : record.email;
         await saveOneAccountSignup(record);
         clearFormDraft('signup');
         state.busy = false; state.done = true; render();
@@ -5741,6 +5801,7 @@ function attachHandlers(){
           }
         }
         await Promise.all(uploadTasks);
+        record.email = currentTutorUser ? currentTutorUser.email : record.email;
         await saveOneDeviceSubmission(record);
         clearFormDraft('device');
         state.busy = false; state.done = true; render();
