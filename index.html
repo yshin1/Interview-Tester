@@ -5647,7 +5647,9 @@ function attachHandlers(){
           gateBusy=false;
           gateError = result.reason === 'email'
             ? "This email isn't on our list of confirmed 1st Demo candidates. Please double-check it, or reach out if you think this is a mistake."
-            : 'That code is not valid.';
+            : result.reason === 'duplicate'
+              ? 'This email has already been used to book a slot. Only one booking is allowed per person.'
+              : 'That code is not valid.';
           render();
         }
       };
