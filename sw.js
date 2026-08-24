@@ -37,7 +37,7 @@ self.addEventListener('push', (event) => {
     // fixed value — silent:true suppresses sound/vibration regardless of
     // the vibrate pattern above, per spec.
     silent: !!data.silent,
-    data: { bookingId: data.bookingId || null }
+    data: { bookingId: data.bookingId || null, forAdmin: !!data.forAdmin }
   };
   // App icon badge (the little number on the home-screen icon) — only
   // does anything on platforms that support the Badging API from a
@@ -60,12 +60,13 @@ self.addEventListener('notificationclick', (event) => {
   if (self.navigator && 'clearAppBadge' in self.navigator) {
     self.navigator.clearAppBadge().catch(() => {});
   }
+  const forAdmin = !!(event.notification.data && event.notification.data.forAdmin);
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for(const client of clientList){
         if('focus' in client) return client.focus();
       }
-      if(self.clients.openWindow) return self.clients.openWindow('./');
+      if(self.clients.openWindow) return self.clients.openWindow(forAdmin ? './?admin' : './');
     })
   );
 });
