@@ -3,8 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Interview Scheduling</title>
-<link rel="manifest" href="manifest.json">
+<title>Langdy Hub</title>
+<link rel="manifest" id="webManifestLink" href="manifest.json">
+<script>
+  // Must run this early (before the page is fully parsed) — Chrome decides
+  // installability/start_url from whichever manifest is linked at that
+  // point, and a manifest swapped in later (e.g. on DOMContentLoaded) can
+  // be too late. A normal <link href="manifest.json"> alone would mean
+  // installing from ANY page — including ?admin — always launches back at
+  // the plain base URL, since that's what start_url in manifest.json says,
+  // regardless of which page you were on when you tapped "Install".
+  if(window.location.search.includes('admin')){
+    document.getElementById('webManifestLink').href = 'manifest-admin.json';
+  }
+</script>
 <meta name="theme-color" content="#16233F">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2301,7 +2313,7 @@ function renderTopbar(mode){ // 'admin' | 'tutor' | 'applicant'
     <div class="brand">
       <div class="brand-mark">L</div>
       <div>
-        <div class="brand-name">Interview Scheduling</div>
+        <div class="brand-name">Langdy Hub</div>
         <div class="brand-sub">${isAdmin ? 'Admin Console' : isTutor ? 'Tutor Chat' : 'Applicant Booking'}</div>
       </div>
     </div>
@@ -2441,7 +2453,7 @@ function renderGate(){
   <div class="center-screen">
     <div class="card gate-card">
       <div class="brand-mark" style="margin-bottom:16px;">L</div>
-      <h1 class="gate-title">Interview Scheduling</h1>
+      <h1 class="gate-title">Langdy Hub</h1>
       <p class="gate-sub">Please enter the access code and email you were given.</p>
       <div class="field">
         <label for="gateCode">Access Code</label>
