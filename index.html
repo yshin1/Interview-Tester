@@ -5537,7 +5537,7 @@ function attachHandlers(){
       state.busy = true; render();
       try{
         const emailNorm = (state.answers[emailField.id]||'').trim().toLowerCase();
-        const applicationId = 'app_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const applicationId = generateSecureId('app');
         const record = { id: applicationId, submittedAt: new Date().toISOString(), score: null, result: '', invited: false, viewedByAdmin: false };
 
         // File uploads and the duplicate-email check used to run one after
@@ -5644,7 +5644,7 @@ function attachHandlers(){
       }
       state.busy = true; render();
       try{
-        const signupId = 'signup_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const signupId = generateSecureId('signup');
         const record = { id: signupId, submittedAt: new Date().toISOString(), reviewed: false, viewedByAdmin: false };
         const uploadTasks = [];
         for(const field of schema){
@@ -5723,7 +5723,7 @@ function attachHandlers(){
       }
       state.busy = true; render();
       try{
-        const deviceId = 'device_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+        const deviceId = generateSecureId('device');
         const record = { id: deviceId, submittedAt: new Date().toISOString(), reviewed: false, viewedByAdmin: false };
         const uploadTasks = [];
         for(const field of schema){
