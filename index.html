@@ -274,6 +274,19 @@
     font-size:10.5px; font-weight:600; cursor:pointer; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .cal-chip:hover{ background:var(--gold-dark); }
+  .cal-mobile-list{ display:none; }
+  .cal-mobile-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 6px; border-bottom:1px solid var(--line); font-size:13.5px;
+  }
+  .cal-mobile-row.weekend{ background:#FAFBFC; }
+  .cal-mobile-row.is-closed{ background:#F4F4F5; color:var(--slate-light); }
+  .cal-mobile-row.is-today .cal-mobile-daynum{ color:var(--gold-dark); }
+  .cal-mobile-date{ display:flex; align-items:baseline; gap:8px; }
+  .cal-mobile-daynum{ font-size:15px; font-weight:800; color:var(--ink); min-width:22px; }
+  .cal-mobile-dow{ font-size:11.5px; color:var(--slate-light); font-weight:600; }
+  .cal-mobile-count{ font-size:12.5px; font-weight:700; color:var(--navy); cursor:pointer; }
+  .td-mobile-label{ display:none; }
 
   /* ---------- table ---------- */
   table.list-table{ width:100%; border-collapse:collapse; font-size:13.5px; }
@@ -353,7 +366,8 @@
   @media (max-width:600px){
     .card{ padding:22px 18px; }
     .topbar{ padding:14px 16px; }
-    .cal-cell{ min-height:70px; font-size:10px; }
+    .cal-grid-desktop{ display:none; }
+    .cal-mobile-list{ display:block; }
     table.list-table{ font-size:12px; }
     .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
 
@@ -380,6 +394,28 @@
     table.chat-list-table td{ padding:2px 0; border:none; font-size:13px; }
     table.chat-list-table td:nth-child(3){ display:none; } /* "When" timestamp */
     table.chat-list-table td:nth-child(4){ position:absolute; top:12px; right:14px; padding:0; }
+
+    /* Demo list, Applications, and Archive tables — same card-per-row idea
+       as the chat list, but these rows carry several dropdowns/buttons
+       rather than one line of text, so cells just stack full-width instead
+       of anything absolutely positioned. .mobile-hide drops columns that
+       are useful on desktop but not essential to see at a glance on a
+       phone (e.g. Booked At, Submitted, Score). */
+    table.demo-list-table thead, table.app-list-table thead, table.archive-list-table thead{ display:none; }
+    table.demo-list-table, table.demo-list-table tbody, table.demo-list-table tr, table.demo-list-table td,
+    table.app-list-table, table.app-list-table tbody, table.app-list-table tr, table.app-list-table td,
+    table.archive-list-table, table.archive-list-table tbody, table.archive-list-table tr, table.archive-list-table td{
+      display:block; width:100%;
+    }
+    table.demo-list-table tr, table.app-list-table tr, table.archive-list-table tr{
+      border:1.5px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px;
+    }
+    table.demo-list-table td, table.app-list-table td, table.archive-list-table td{ padding:5px 0; border:none; }
+    table.demo-list-table td select, table.app-list-table td select,
+    table.demo-list-table td input, table.demo-list-table td textarea{ width:100%; box-sizing:border-box; }
+    table.demo-list-table .row-actions, table.app-list-table .row-actions, table.archive-list-table .row-actions{ margin-top:6px; }
+    .td-mobile-label{ display:block; font-size:10px; font-weight:800; color:var(--slate-light); text-transform:uppercase; letter-spacing:.03em; margin-bottom:3px; }
+    table.mobile-hide, td.mobile-hide{ display:none; }
   }
 
   /* ---------- phone-sized screens: applicant/tutor booking + chat ----------
@@ -1178,10 +1214,10 @@ async function findBookingByEmail(email){
 }
 // Verifies the applicant/1st-demo access code server-side — real value
 // never sent to the client.
-async function verifyApplicantCode(code){
+async function verifyApplicantCode(code, email){
   const callable = fbFunctions.httpsCallable('verifyApplicantCode');
-  const result = await callable({ code });
-  return !!(result.data && result.data.valid);
+  const result = await callable({ code, email });
+  return (result.data) || { valid: false, reason: 'code' };
 }
 async function loadApplicantCodeForAdmin(){
   try{
@@ -1910,18 +1946,6 @@ function generateSecureId(prefix){
   else for(let i=0;i<16;i++) bytes[i] = Math.floor(Math.random()*256);
   return prefix + '_' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
 }
-// Short, human-typable single-use invite codes (8 chars) — distinct from
-// generateSecureId above, which makes long UUIDs meant for document IDs,
-// not something a person copy-pastes out of an email into a form. Excludes
-// visually ambiguous characters (0/O, 1/I/L) since people do sometimes
-// retype these by hand instead of pasting.
-function generateInviteCode(){
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const bytes = new Uint8Array(8);
-  if(typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
-  else for(let i=0;i<8;i++) bytes[i] = Math.floor(Math.random()*256);
-  return Array.from(bytes).map(b => chars[b % chars.length]).join('');
-}
 // Remembers a still-applicant's (not-yet-a-tutor) booking ID in THIS
 // browser, so they don't have to retype their email every visit — purely a
 // same-device convenience, not a new access grant. The booking ID is
@@ -2403,10 +2427,14 @@ function renderGate(){
     <div class="card gate-card">
       <div class="brand-mark" style="margin-bottom:16px;">L</div>
       <h1 class="gate-title">Interview Scheduling</h1>
-      <p class="gate-sub">Please enter the access code you were given.</p>
+      <p class="gate-sub">Please enter the access code and email you were given.</p>
       <div class="field">
         <label for="gateCode">Access Code</label>
         <input type="text" id="gateCode" placeholder="Enter your code" autocomplete="off" ${gateBusy?'disabled':''}>
+      </div>
+      <div class="field">
+        <label for="gateEmail">Email</label>
+        <input type="email" id="gateEmail" placeholder="you@example.com" autocomplete="email" ${gateBusy?'disabled':''}>
       </div>
       <button class="btn btn-primary" id="gateSubmit" ${gateBusy?'disabled':''}>${gateBusy?'Checking…':'Enter'}</button>
       ${gateError ? `<div class="error-text">${escapeHtml(gateError)}</div>` : ''}
@@ -3374,6 +3402,7 @@ function renderAdminCalendar(){
   const year = base.getFullYear(), month = base.getMonth();
   const cells = monthMatrix(year, month);
   const dowHtml = DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  const todayStr = fmtDate(new Date());
 
   const CHIP_CAP = 3;
   const cellsHtml = cells.map(d=>{
@@ -3404,6 +3433,31 @@ function renderAdminCalendar(){
     </div>`;
   }).join('');
 
+  // Mobile-only alternative to the grid above — a 7-column month grid has
+  // no room left for a name once you're down to phone width, so this is a
+  // plain vertical list instead: one row per day, tap a day with bookings
+  // to open the same day-detail modal the grid's "+N more" already uses.
+  const mobileListHtml = cells.filter(d => d !== null).map(d => {
+    const dt = new Date(year, month, d);
+    const ds = fmtDate(dt);
+    const weekend = dt.getDay()===0 || dt.getDay()===6;
+    const closed = isDateClosed(ds);
+    const firstCount = calShowFirstDemo ? bookings.filter(b=>b.date===ds).length : 0;
+    const secondCount = calShowSecondDemo ? bookings.filter(b=>b.secondDemoDate===ds && b.demoResult==='pass').length : 0;
+    const total = firstCount + secondCount;
+    const isToday = ds === todayStr;
+    const parts = [];
+    if(firstCount>0) parts.push(`${firstCount} 1st`);
+    if(secondCount>0) parts.push(`${secondCount} 2nd`);
+    return `<div class="cal-mobile-row ${weekend?'weekend':''} ${closed?'is-closed':''} ${isToday?'is-today':''}" ${total>0?`data-day-detail="${ds}"`:''}>
+      <div class="cal-mobile-date">
+        <span class="cal-mobile-daynum">${d}</span>
+        <span class="cal-mobile-dow">${DOW[dt.getDay()]}${isToday?' · Today':''}</span>
+      </div>
+      ${closed ? '<span class="closed-tag">Closed</span>' : total>0 ? `<span class="cal-mobile-count">${parts.join(', ')} ›</span>` : ''}
+    </div>`;
+  }).join('');
+
   return `
   <div class="card">
     <div class="cal-header">
@@ -3415,8 +3469,9 @@ function renderAdminCalendar(){
       <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="calFilterFirst" ${calShowFirstDemo?'checked':''}> 1st Demo</label>
       <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="calFilterSecond" ${calShowSecondDemo?'checked':''}> 2nd Demo <span style="color:var(--slate-light); font-weight:400;">(KST)</span></label>
     </div>
-    <div class="cal-grid">${dowHtml}${cellsHtml}</div>
-    <p style="font-size:12px; color:var(--slate-light); margin-top:14px;">Click a 1st Demo name to reassign or cancel it. Click a 2nd Demo (🅱) name to open the chat. Click "+N more" to see everyone booked that day.</p>
+    <div class="cal-grid cal-grid-desktop">${dowHtml}${cellsHtml}</div>
+    <div class="cal-mobile-list">${mobileListHtml}</div>
+    <p class="cal-grid-desktop" style="font-size:12px; color:var(--slate-light); margin-top:14px;">Click a 1st Demo name to reassign or cancel it. Click a 2nd Demo (🅱) name to open the chat. Click "+N more" to see everyone booked that day.</p>
   </div>
   ${dayDetailTarget ? renderDayDetailModal() : ''}`;
 }
@@ -3517,7 +3572,6 @@ let reapplicationHistoryTarget = null;
 let deleteApplicationTarget = null;
 let deleteTutorChatTarget = null;
 let selectedApplicationIds = new Set();
-let bulkInviteResultText = ''; // name/email/code list shown after "Send Invite to Selected" — each person gets their own code now
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
@@ -3543,9 +3597,10 @@ function renderAdminApplications(){
     <tr>
       <td><input type="checkbox" data-select-app="${a.id}" ${selectedApplicationIds.has(a.id)?'checked':''} style="width:16px; height:16px; accent-color:var(--navy);"></td>
       <td><strong>${escapeHtml(a.fullName)}</strong>${renderNewBadge(a)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(a.email)}</span><br><span style="color:var(--slate-light); font-size:10.5px;">Worked before: ${escapeHtml(a.workedBefore||'—')}</span></td>
-      <td class="tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
-      <td class="tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
+      <td class="mobile-hide tag">${new Date(a.submittedAt).toLocaleString('en-US')}</td>
+      <td class="mobile-hide tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
       <td>
+        <span class="td-mobile-label">Result</span>
         <select data-result-app="${a.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
           <option value="" ${!a.result?'selected':''}>Pending</option>
           <option value="pass" ${a.result==='pass'?'selected':''}>Pass</option>
@@ -3571,13 +3626,6 @@ function renderAdminApplications(){
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
-    ${bulkInviteResultText ? `
-    <div class="card" style="background:var(--paper-2); margin-bottom:16px;">
-      <div class="section-title" style="font-size:13.5px;">Invite codes generated — copy into your own email/BCC tool</div>
-      <div class="section-desc">Each person needs their own code below (single combined emails can't carry a different code per recipient).</div>
-      <textarea id="bulkInviteResultBox" readonly style="width:100%; min-height:120px; font-family:monospace; font-size:12.5px; padding:10px; border:1.5px solid var(--line); border-radius:8px;">${escapeHtml(bulkInviteResultText)}</textarea>
-      <button class="btn btn-ghost btn-sm" id="bulkInviteResultCloseBtn" style="width:auto; margin-top:8px;">Dismiss</button>
-    </div>` : ''}
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -3599,7 +3647,7 @@ function renderAdminApplications(){
       </select>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
     </div>
-    <table class="list-table">
+    <table class="list-table app-list-table">
       <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Invited</th><th>View</th><th>Delete</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -3790,9 +3838,10 @@ function renderAdminAccountSignups(){
   const rows = sorted.map(s => `
     <tr>
       <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(s.email)}</span></td>
-      <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
+      <td class="mobile-hide tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
       <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
       <td>
+        <span class="td-mobile-label">Account Status</span>
         <select data-signup-account-status="${s.id}" style="padding:7px 9px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
           <option value="" ${!s.accountCreationStatus?'selected':''}>—</option>
           ${ACCOUNT_CREATION_STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.accountCreationStatus===o?'selected':''}>${o}</option>`).join('')}
@@ -3810,7 +3859,7 @@ function renderAdminAccountSignups(){
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportSignupsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     ${filterBar}
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Tutor</th><th>Submitted</th><th>Reviewed</th><th>Account Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -3900,7 +3949,7 @@ function renderAdminDeviceSubmissions(){
   const rows = sorted.map(s => `
     <tr>
       <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}</td>
-      <td class="tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
+      <td class="mobile-hide tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
       <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
       <td>
         <div class="row-actions">
@@ -3913,7 +3962,7 @@ function renderAdminDeviceSubmissions(){
   <div class="card">
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportDeviceExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
-    <table class="list-table">
+    <table class="list-table archive-list-table">
       <thead><tr><th>Tutor</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4015,16 +4064,17 @@ function renderAdminList(){
     return `
     <tr>
       <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
-      <td class="tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
-      <td class="tag">${fmtDateLabel(b.date)}</td>
-      <td class="tag">${b.time}</td>
+      <td class="mobile-hide tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
+      <td class="tag"><span class="td-mobile-label">Date</span>${fmtDateLabel(b.date)}</td>
+      <td class="tag"><span class="td-mobile-label">Time (PH)</span>${b.time}</td>
       <td>
+        <span class="td-mobile-label">Assigned</span>
         <select data-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
           <option value="" ${!b.assignedTo?'selected':''}>—</option>
           ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.assignedTo===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </td>
-      <td>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
+      <td><span class="td-mobile-label">1st Demo Result</span>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unread>0?`<span class="unread-badge">${unread}</span>`:''}</button>
@@ -4038,7 +4088,7 @@ function renderAdminList(){
   return `
   <div class="card">
     ${filterBar}
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Applicant</th><th>Booked At</th><th>Date</th><th>Time (PH)</th><th>Assigned</th><th>1st Demo Result</th><th>Manage</th></tr></thead>
       <tbody>${trs}</tbody>
     </table>
@@ -4448,11 +4498,12 @@ function renderAdminTutorChats(){
       <td style="max-width:340px;">
         ${last ? `<span style="font-weight:${unread>0?'700':'400'};">${escapeHtml(who)}:</span> <span style="color:${unread>0?'var(--ink)':'var(--slate)'};">${escapeHtml(preview)}</span>` : `<span style="color:var(--slate-light);">${preview}</span>`}
       </td>
-      <td class="tag">${last ? new Date(last.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—'}</td>
+      <td class="mobile-hide tag">${last ? new Date(last.at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—'}</td>
       <td>${unread>0 ? `<span class="unread-badge">${unread}</span>` : ''}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
+          <span class="td-mobile-label" style="margin-top:4px;">Employment Status</span>
           <select data-employment-status="${b.id}" style="padding:3px 4px; border:1.5px solid var(--line); border-radius:6px; font-size:10.5px; font-family:inherit; width:auto; max-width:78px;">
             <option value="active" selected>Active</option>
             <option value="resigned">Resigned</option>
@@ -4475,7 +4526,7 @@ function renderAdminTutorChats(){
       <button class="btn btn-gold btn-sm" id="openAddExistingTutorBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">+ Add Existing Tutor</button>
     </div>
     <div class="section-desc" style="margin-bottom:14px;">Already-hired tutors who never went through this site's apply/demo pipeline can be added directly here — this creates their record and sends the same account invite as everyone else.</div>
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Tutor</th><th>Last Message</th><th>When</th><th>Unread</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4509,8 +4560,8 @@ function renderAdminFormerTutors(status){
     return `
     <tr>
       <td><strong>${escapeHtml(displayLabel)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
-      <td><input type="date" data-employment-date="${b.id}" value="${dateVal}" style="padding:7px 8px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;"></td>
-      <td><textarea data-employment-note="${b.id}" placeholder="Reason / notes (optional)" rows="1" class="auto-grow-textarea" style="width:100%; min-width:160px; min-height:38px; height:38px; overflow:hidden; resize:vertical; padding:7px 10px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;">${escapeHtml(b.tutorEmploymentNote||'')}</textarea></td>
+      <td><span class="td-mobile-label">Date</span><input type="date" data-employment-date="${b.id}" value="${dateVal}" style="padding:7px 8px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;"></td>
+      <td><span class="td-mobile-label">Note</span><textarea data-employment-note="${b.id}" placeholder="Reason / notes (optional)" rows="1" class="auto-grow-textarea" style="width:100%; min-width:160px; min-height:38px; height:38px; overflow:hidden; resize:vertical; padding:7px 10px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;">${escapeHtml(b.tutorEmploymentNote||'')}</textarea></td>
       <td>
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
@@ -4525,7 +4576,7 @@ function renderAdminFormerTutors(status){
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <input type="text" id="formerTutorsSearchInput" data-status="${status}" placeholder="Search by name…" value="${escapeHtml(formerTutorsSearchQuery[status])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Tutor</th><th>Date</th><th>Note</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4551,8 +4602,9 @@ function renderAdminTutorList(){
     return `
     <tr>
       <td><strong>${escapeHtml(displayLabel)}</strong>${b.existingTutor ? ' <span style="color:var(--slate-light); font-size:10.5px; font-weight:400;">(existing tutor)</span>' : ''}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span>${(b.adminChatLabel && b.adminChatLabel!==b.fullName) ? `<br><span style="color:var(--slate-light); font-size:10.5px;">Full name: ${escapeHtml(b.fullName)}</span>` : ''}</td>
-      <td class="tag">${joinedDate ? new Date(joinedDate).toLocaleDateString('en-US') : '—'}</td>
+      <td class="mobile-hide tag">${joinedDate ? new Date(joinedDate).toLocaleDateString('en-US') : '—'}</td>
       <td>
+        <span class="td-mobile-label">Status</span>
         <select data-employment-status="${b.id}" style="padding:7px 9px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
           <option value="active" selected>Active</option>
           <option value="resigned">Resigned</option>
@@ -4573,7 +4625,7 @@ function renderAdminTutorList(){
       <input type="text" id="tutorListSearchInput" placeholder="Search by name or email…" value="${escapeHtml(tutorListSearchQuery)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
       <span style="font-size:12.5px; color:var(--slate-light); white-space:nowrap;">${active.length} active tutor${active.length===1?'':'s'}</span>
     </div>
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Tutor</th><th>Joined</th><th>Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4616,7 +4668,7 @@ function renderAdminArchiveApplications(){
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <input type="text" id="archiveAppSearchInput" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery.application)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
-    <table class="list-table">
+    <table class="list-table archive-list-table">
       <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4673,7 +4725,7 @@ function renderAdminArchive(category){
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <input type="text" id="archiveSearchInput" data-category="${category}" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery[category])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
-    <table class="list-table">
+    <table class="list-table archive-list-table">
       <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4694,16 +4746,17 @@ function renderAdminSecondDemo(){
   const rows = sorted.map(b => `
     <tr>
       <td><strong>${escapeHtml(b.fullName)}</strong>${b.secondDemoResult ? '' : renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
-      <td>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
+      <td><span class="td-mobile-label">1st Demo Result</span>${renderResultSelect('demoresult-id', b.id, b.demoResult||'')}</td>
       <td>
+        <span class="td-mobile-label">2nd Demo Assigned</span>
         <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
           <option value="" ${!b.secondDemoAssignedTo?'selected':''}>—</option>
           ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.secondDemoAssignedTo===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </td>
-      <td>${renderSingleDateSelect('2nd-date-id', b.id, b.secondDemoDate||'')}</td>
-      <td>${renderSingleTimeSelect('2nd-time-id', b.id, b.secondDemoTime||'')}</td>
-      <td>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
+      <td><span class="td-mobile-label">2nd Demo Date (KST)</span>${renderSingleDateSelect('2nd-date-id', b.id, b.secondDemoDate||'')}</td>
+      <td><span class="td-mobile-label">2nd Demo Time (KST)</span>${renderSingleTimeSelect('2nd-time-id', b.id, b.secondDemoTime||'')}</td>
+      <td><span class="td-mobile-label">2nd Demo Result</span>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unreadCountForAdmin(b)>0?`<span class="unread-badge">${unreadCountForAdmin(b)}</span>`:''}</button>
@@ -4714,7 +4767,7 @@ function renderAdminSecondDemo(){
   return `
   <div class="card">
     <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 1st Demo Result show up here. If a "Pass" was entered by mistake, change it back using the <strong>1st Demo Result</strong> column — they'll disappear from here immediately and return to the 1st Demo tab. The 2nd Demo date/time below is set manually (scheduled verbally, not through the booking system) and is completely separate from the 1st Demo slots — no capacity limits apply. Times are in <strong>Korea Standard Time (KST)</strong>, not PHT.</p>
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Applicant</th><th>1st Demo Result</th><th>2nd Demo Assigned</th><th>2nd Demo Date (KST)</th><th>2nd Demo Time (KST)</th><th>2nd Demo Result</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4864,21 +4917,23 @@ function renderAdminOnboarding(){
   const rows = sorted.length===0 ? `<tr><td colspan="7" style="padding:24px; text-align:center; color:var(--slate-light);">No one matches this filter.</td></tr>` : sorted.map(b => `
     <tr>
       <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
-      <td>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
+      <td><span class="td-mobile-label">2nd Demo Result</span>${renderResultSelect('2nd-result-id', b.id, b.secondDemoResult||'')}</td>
       <td>
+        <span class="td-mobile-label">Assigned</span>
         <select data-2nd-assign-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
           <option value="" ${!b.secondDemoAssignedTo?'selected':''}>—</option>
           ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${b.secondDemoAssignedTo===n?'selected':''}>${n}</option>`).join('')}
         </select>
       </td>
       <td>
+        <span class="td-mobile-label">Status</span>
         <select data-onboard-status-id="${b.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
           <option value="" ${!b.onboardingStatus?'selected':''}>—</option>
           ${ONBOARDING_STATUS_OPTIONS.map(s=>`<option value="${s}" ${b.onboardingStatus===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </td>
-      <td>${renderSingleDateSelect('onboard-date-id', b.id, b.onboardingDate||'')}</td>
-      <td>${renderSingleTimeSelect('onboard-time-id', b.id, b.onboardingTime||'')}</td>
+      <td><span class="td-mobile-label">Date</span>${renderSingleDateSelect('onboard-date-id', b.id, b.onboardingDate||'')}</td>
+      <td><span class="td-mobile-label">Time</span>${renderSingleTimeSelect('onboard-time-id', b.id, b.onboardingTime||'')}</td>
       <td>
         <div class="row-actions">
           <button class="btn btn-ghost btn-sm" data-chat-id="${b.id}">💬 Chat${unreadCountForAdmin(b)>0?`<span class="unread-badge">${unreadCountForAdmin(b)}</span>`:''}</button>
@@ -4904,7 +4959,7 @@ function renderAdminOnboarding(){
       </label>
     </div>
     <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 2nd Demo Result show up here. If entered by mistake, change it back in the "2nd Demo Result" column below and they'll return to the 2nd Demo tab.</p>
-    <table class="list-table">
+    <table class="list-table demo-list-table">
       <thead><tr><th>Applicant</th><th>2nd Demo Result</th><th>Assigned</th><th>Status</th><th>Date</th><th>Time</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -5534,17 +5589,26 @@ function attachHandlers(){
     if(gateMode==='code'){
       const submit = async () => {
         const val = $('#gateCode').value.trim();
+        const emailVal = $('#gateEmail').value.trim();
         if(!val){ gateError='Please enter a code.'; render(); return; }
+        if(!isValidEmail(emailVal)){ gateError='Please enter a valid email address.'; render(); return; }
         gateBusy = true; gateError=''; render();
         await loadSlotAvailability();
-        if(await verifyApplicantCode(val)){
+        const result = await verifyApplicantCode(val, emailVal);
+        if(result.valid){
           verifiedApplicantCode = val;
+          bk.email = emailVal; // carried into the booking form below so they don't have to retype it
           view='book'; gateBusy=false; render();
         } else {
-          gateBusy=false; gateError='That code is not valid.'; render();
+          gateBusy=false;
+          gateError = result.reason === 'email'
+            ? "This email isn't on our list of confirmed 1st Demo candidates. Please double-check it, or reach out if you think this is a mistake."
+            : 'That code is not valid.';
+          render();
         }
       };
       $('#gateSubmit').onclick = submit;
+      $('#gateEmail').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
       $('#gateCode').addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
       $('#gateCode').focus();
       const findLink = $('#gateSwitchToFind');
@@ -5819,6 +5883,13 @@ function attachHandlers(){
           bk.error='Sorry, another applicant just booked this time. Please choose another slot.'; bk.step=2; bk.time=null; render();
         } else if(code === 'failed-precondition'){
           bk.error='This date was just closed by the organizer. Please pick another date.'; bk.step=1; bk.date=null; bk.time=null; render();
+        } else if(code === 'permission-denied'){
+          // Covers both an invalid access code and (more likely at this
+          // point, since the gate screen already checked the code) an
+          // email that doesn't match a passed, invited applicant — the
+          // server's message distinguishes which for the person.
+          bk.error = (lastError && lastError.message) || 'This booking could not be completed. Please double-check your details.';
+          render();
         } else {
           bk.error='The server seems busy right now. Please wait a moment and try again.'; render();
         }
@@ -6046,19 +6117,18 @@ function attachHandlers(){
     }
 
     if(adminTab==='applications'){
+      if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
       const exportBtn = $('#exportApplicationsExcelBtn');
       if(exportBtn) exportBtn.onclick = () => {
         exportSubmissionsToExcel(applications, formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA, 'Langdy_Applications');
       };
-      const bulkResultCloseBtn = $('#bulkInviteResultCloseBtn');
-      if(bulkResultCloseBtn) bulkResultCloseBtn.onclick = () => { bulkInviteResultText = ''; render(); };
-      const buildInviteBody = (name, code) => `Hi ${name},
+      const buildInviteBody = (name) => `Hi ${name},
 
 Congratulations! You've been selected to move forward with your 1st Demo class.
 
 Please use the access code below to book your interview slot:
 
-Access Code: ${code}
+Access Code: ${applicantCodeAdmin==null?'(loading — try again in a moment)':applicantCodeAdmin}
 
 Booking link: ${window.location.origin + window.location.pathname}
 
@@ -6116,13 +6186,9 @@ Langdy Team`;
           const id = el.dataset.inviteApp;
           const a = applications.find(x=>x.id===id);
           if(!a) return;
-          // Reuse the existing code if this person was already invited once
-          // before (e.g. admin re-sending because the email bounced) rather
-          // than generating a new one and silently orphaning the old code.
-          const code = a.inviteCode || generateInviteCode();
-          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName, code))}`;
+          const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName))}`;
           window.open(gmailUrl, '_blank');
-          await saveOneApplication(Object.assign({}, a, { invited:true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false }));
+          await saveOneApplication(Object.assign({}, a, { invited:true }));
           render();
         };
       });
@@ -6132,24 +6198,13 @@ Langdy Team`;
         const ids = [...selectedApplicationIds];
         const selected = applications.filter(a => ids.includes(a.id));
         if(selected.length === 0) return;
-        // A single combined email can't carry a different code per
-        // recipient, so bulk invite generates one code per person and
-        // lists them for admin to paste into their own mail-merge/BCC
-        // tool, instead of opening one shared-body Gmail compose.
+        const emails = selected.map(a => a.email).join(',');
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
+        window.open(gmailUrl, '_blank');
         const batch = adminDb.batch();
-        const lines = [];
-        selected.forEach(a => {
-          const code = a.inviteCode || generateInviteCode();
-          batch.update(adminDb.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false });
-          lines.push(`${a.fullName} <${a.email}> — ${code}`);
-        });
+        selected.forEach(a => { batch.update(adminDb.collection(APPLICATIONS_COLLECTION).doc(a.id), { invited: true }); });
         await batch.commit();
-        applications = applications.map(a => {
-          if(!ids.includes(a.id)) return a;
-          const code = a.inviteCode || lines.find(l => l.includes(a.email)).split(' — ').pop();
-          return Object.assign({}, a, { invited:true, inviteCode: code, inviteCodeUsed: a.inviteCodeUsed || false });
-        });
-        bulkInviteResultText = lines.join('\n');
+        applications = applications.map(a => ids.includes(a.id) ? Object.assign({}, a, { invited:true }) : a);
         selectedApplicationIds = new Set();
         render();
       };
@@ -7519,9 +7574,10 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
   // previous visit), skip straight back to their chat instead of showing
   // the access-code screen — same convenience "Find your chat" already
   // gave them, just without needing to retype the email every time. Only
-  // applies on a plain visit (view is still 'gate' — no ?apply/?admin/
-  // ?tutor/etc link brought them here for something else).
-  if(view === 'gate'){
+  // applies on a plain visit — explicitly excludes ?admin/?tutor too, not
+  // just checking view==='gate', since those links only change gateMode
+  // (not view), so the view check alone never actually caught them.
+  if(view === 'gate' && !cameFromAdminLink && !cameFromTutorLink){
     const rememberedId = getRememberedBookingId();
     if(rememberedId){
       try{
