@@ -1,7 +1,7 @@
 {
-  "name": "Langdy Hub",
-  "short_name": "Langdy Hub",
-  "start_url": "./",
+  "name": "Langdy Hub — Admin",
+  "short_name": "Langdy Admin",
+  "start_url": "./?admin",
   "scope": "./",
   "display": "standalone",
   "background_color": "#F1F2F4",
