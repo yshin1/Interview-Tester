@@ -985,6 +985,8 @@ let chatAdminReadCutoffAtOpen = null;
 let editDate = null, editTime = null, editError = '';
 let codeChangeState = { newApplicant:'', newExistingTutor:'', error:'', success:'', busy:false };
 let applicantCodeAdmin = null; // loaded on-demand for admin's Settings > Codes view; null until loaded
+let applicantTestCodeAdmin = null; // separate code that bypasses the invited-email check, for admin's own QA
+let testCodeChangeState = { newCode: '', error: '', success: '', busy: false };
 let verifiedApplicantCode = ''; // the code the gate screen confirmed valid — threaded through to createBooking
 let capacityDraft = null;
 let capacityDayTab = 1; // 1=Mon .. 5=Fri
@@ -1226,6 +1228,19 @@ async function loadApplicantCodeForAdmin(){
   }catch(e){
     console.error('Failed to load applicant code:', e);
     applicantCodeAdmin = null;
+  }
+}
+// The separate test code that bypasses the invited-email check (see
+// checkAdminTestCode in functions/index.js) — unset by default, since most
+// admins won't need it and it's a real bypass, not something to enable
+// casually.
+async function loadApplicantTestCodeForAdmin(){
+  try{
+    const snap = await db.collection('adminSecrets').doc('applicantTestCode').get();
+    applicantTestCodeAdmin = snap.exists ? (snap.data().code || '') : '';
+  }catch(e){
+    console.error('Failed to load applicant test code:', e);
+    applicantTestCodeAdmin = null;
   }
 }
 async function loadBookings(){
@@ -5161,6 +5176,8 @@ function renderAdminAccountSection(){
 
 function renderAdminCodes(){
   const s = codeChangeState;
+  const t = testCodeChangeState;
+  const hasTestCode = !!applicantTestCodeAdmin;
   return `
   ${renderAdminAccountSection()}
   <div class="card">
@@ -5174,6 +5191,21 @@ function renderAdminCodes(){
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
     ${s.success ? `<div class="success-text">${escapeHtml(s.success)}</div>` : ''}
     <button class="btn btn-primary" style="width:auto; padding:12px 26px; margin-top:8px;" id="codeSaveBtn" ${s.busy?'disabled':''}>${s.busy?'Saving…':'Save Changes'}</button>
+  </div>
+  <div class="card">
+    <div class="section-title">Admin Test Code</div>
+    <div class="section-desc">A separate code just for your own testing — unlike the applicant code above, entering this one skips the invited-candidate email check entirely, so you can test the booking flow with any email. ${hasTestCode ? `Currently set to <strong>${escapeHtml(applicantTestCodeAdmin)}</strong>.` : 'Not set — the applicant code above requires a real invited email either way.'}</div>
+
+    <div class="field">
+      <label>${hasTestCode ? 'Change Test Code' : 'Set Test Code'}</label>
+      <input type="text" id="newTestCodeInput" placeholder="e.g. ADMINTEST" value="${escapeHtml(t.newCode)}">
+    </div>
+    ${t.error ? `<div class="error-text">${escapeHtml(t.error)}</div>` : ''}
+    ${t.success ? `<div class="success-text">${escapeHtml(t.success)}</div>` : ''}
+    <div style="display:flex; gap:10px; align-items:center; margin-top:8px;">
+      <button class="btn btn-primary" style="width:auto; padding:12px 26px;" id="testCodeSaveBtn" ${t.busy?'disabled':''}>${t.busy?'Saving…':'Save'}</button>
+      ${hasTestCode ? `<button class="btn btn-ghost" style="width:auto; padding:12px 20px;" id="testCodeClearBtn" ${t.busy?'disabled':''}>Turn Off</button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -7043,6 +7075,7 @@ Langdy Team`;
 
     if(adminTab==='codes'){
       if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
+      if(applicantTestCodeAdmin === null) loadApplicantTestCodeForAdmin().then(render);
       $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
       $('#codeSaveBtn').onclick = async () => {
         const s = codeChangeState;
@@ -7055,6 +7088,30 @@ Langdy Team`;
         await db.collection('adminSecrets').doc('applicantCode').set({ code: newCode });
         applicantCodeAdmin = newCode;
         s.busy=false; s.success='Applicant code updated successfully.'; s.newApplicant='';
+        render();
+      };
+
+      $('#newTestCodeInput').oninput = e => { testCodeChangeState.newCode = e.target.value; };
+      $('#testCodeSaveBtn').onclick = async () => {
+        const t = testCodeChangeState;
+        t.error=''; t.success='';
+        if(!t.newCode.trim()){
+          t.error = 'Enter a code, or use "Turn Off" to disable it.'; render(); return;
+        }
+        t.busy = true; render();
+        const newCode = t.newCode.trim();
+        await db.collection('adminSecrets').doc('applicantTestCode').set({ code: newCode });
+        applicantTestCodeAdmin = newCode;
+        t.busy=false; t.success='Test code saved.'; t.newCode='';
+        render();
+      };
+      const testCodeClearBtn = $('#testCodeClearBtn');
+      if(testCodeClearBtn) testCodeClearBtn.onclick = async () => {
+        const t = testCodeChangeState;
+        t.busy = true; t.error=''; t.success=''; render();
+        await db.collection('adminSecrets').doc('applicantTestCode').set({ code: '' });
+        applicantTestCodeAdmin = '';
+        t.busy=false; t.success='Test code turned off.';
         render();
       };
 
