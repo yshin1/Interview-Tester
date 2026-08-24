@@ -5644,6 +5644,7 @@ function attachHandlers(){
   if(view==='signupForm' && !dynamicFormState.signup.done){
     const formKey = 'signup';
     const state = dynamicFormState[formKey];
+    if(currentTutorUser) state.answers.email = currentTutorUser.email;
     const schema = formSchemas.signup || SIGNUP_FORM_DEFAULT_SCHEMA;
     const draftRestoreBtn = $('#draftRestoreBtn_signup');
     if(draftRestoreBtn) draftRestoreBtn.onclick = () => {
@@ -5738,6 +5739,7 @@ function attachHandlers(){
   if(view==='deviceForm' && !dynamicFormState.device.done){
     const formKey = 'device';
     const state = dynamicFormState[formKey];
+    if(currentTutorUser) state.answers.email = currentTutorUser.email;
     const schema = formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA;
     const draftRestoreBtn = $('#draftRestoreBtn_device');
     if(draftRestoreBtn) draftRestoreBtn.onclick = () => {
