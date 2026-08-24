@@ -1653,6 +1653,9 @@ function startChatPolling(bookingId, onTick){
   chatDocUnsubscribe = bookingRef.onSnapshot(doc => {
     if(!doc.exists) return;
     const freshFields = Object.assign({ id: doc.id }, doc.data());
+    if(bookingId === bk.id && typeof freshFields.pushDisabled === 'boolean'){
+      chatNotificationsEnabled = !freshFields.pushDisabled;
+    }
     const idx = bookings.findIndex(b => b.id === bookingId);
     const existingMessages = idx !== -1 ? bookings[idx].messages : undefined;
     const merged = existingMessages ? Object.assign(freshFields, { messages: existingMessages }) : freshFields;
@@ -3169,15 +3172,132 @@ function renderChatNotificationBanner(bookingId){
 // conversation to subscribe to); admin's usage omits it, since push
 // delivery here is specifically for admin's messages reaching the
 // applicant/tutor, not the other direction.
+// The other half of subscribeToPushNotifications — removes this device's
+// push subscription doc so sendPushOnAdminMessage has nothing left to send
+// to. Deliberately doesn't call the browser's sub.unsubscribe() itself:
+// this device might share the same underlying PushSubscription across
+// other bookings if there were any, and deleting our own Firestore
+// record is sufficient to stop delivery for THIS booking specifically.
+async function unsubscribeFromPushNotifications(bookingId){
+  if(!bookingId) return;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(!sub) return;
+    const subJson = sub.toJSON();
+    if(!subJson.endpoint) return;
+    const subId = 'sub_' + hashString(subJson.endpoint);
+    await db.collection(BOOKINGS_COLLECTION).doc(bookingId).collection('pushSubscriptions').doc(subId).delete();
+  }catch(e){
+    console.error('Push unsubscribe failed:', e);
+  }
+}
+// Admin's side of the same Web Push setup — not scoped to any one booking
+// (admin has many conversations, not just one), so subscriptions live in
+// their own top-level collection instead of a booking's subcollection.
+// Delivers via sendPushOnApplicantMessage whenever an applicant/tutor
+// sends a message, same reasoning as the applicant/tutor side: reaches
+// admin even with no tab open at all.
+async function subscribeToAdminPushNotifications(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub){
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const subJson = sub.toJSON();
+    if(!subJson.endpoint || !subJson.keys) return;
+    const subId = 'sub_' + hashString(subJson.endpoint);
+    await db.collection('adminPushSubscriptions').doc(subId).set({
+      endpoint: subJson.endpoint,
+      keys: subJson.keys,
+      userAgent: (navigator.userAgent||'').slice(0,200),
+      createdAt: new Date().toISOString()
+    });
+  }catch(e){
+    console.error('Admin push subscription failed:', e);
+  }
+}
+async function unsubscribeFromAdminPushNotifications(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(!sub) return;
+    const subJson = sub.toJSON();
+    if(!subJson.endpoint) return;
+    const subId = 'sub_' + hashString(subJson.endpoint);
+    await db.collection('adminPushSubscriptions').doc(subId).delete();
+  }catch(e){
+    console.error('Admin push unsubscribe failed:', e);
+  }
+}
+// Reflects whatever this device's actual subscription state is into the
+// "on/off" label the first time admin views a chat each session — without
+// this, chatNotificationsEnabled would just default to true on every
+// reload regardless of whether a subscription doc actually exists.
+let adminPushSyncAttempted = false;
+async function syncAdminPushToggleState(){
+  if(adminPushSyncAttempted) return;
+  adminPushSyncAttempted = true;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(!sub){ chatNotificationsEnabled = false; render(); return; }
+    const subJson = sub.toJSON();
+    if(!subJson.endpoint){ chatNotificationsEnabled = false; render(); return; }
+    const subId = 'sub_' + hashString(subJson.endpoint);
+    const doc = await db.collection('adminPushSubscriptions').doc(subId).get();
+    chatNotificationsEnabled = doc.exists;
+    render();
+  }catch(e){
+    console.error('Admin push sync failed:', e);
+  }
+}
 async function toggleChatNotifications(bookingId){
+  const isAdminContext = !bookingId && !!currentAdminUser;
   if(chatNotificationPermission !== 'granted'){
     await requestChatNotificationPermission();
     chatNotificationsEnabled = true;
-    if(chatNotificationPermission === 'granted' && bookingId) await subscribeToPushNotifications(bookingId);
+    if(chatNotificationPermission === 'granted'){
+      if(bookingId){
+        await subscribeToPushNotifications(bookingId);
+        await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ pushDisabled: false }).catch(()=>{});
+      } else if(isAdminContext){
+        await subscribeToAdminPushNotifications();
+      }
+    }
     render();
   } else {
+    // "Off" used to only hide the in-page banner while the tab was open —
+    // the actual push subscription in Firestore stayed active the whole
+    // time, so background notifications kept arriving regardless. It also
+    // wasn't saved anywhere, so a page reload silently turned notifications
+    // back "on" too. Both are fixed by actually removing the subscription
+    // (see unsubscribeFromPushNotifications) and persisting the choice
+    // rather than only in this in-memory flag.
+    const turningOff = chatNotificationsEnabled;
     chatNotificationsEnabled = !chatNotificationsEnabled;
     render();
+    if(bookingId){
+      if(turningOff){
+        await unsubscribeFromPushNotifications(bookingId);
+        await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ pushDisabled: true }).catch(()=>{});
+      } else {
+        await subscribeToPushNotifications(bookingId);
+        await db.collection(BOOKINGS_COLLECTION).doc(bookingId).update({ pushDisabled: false }).catch(()=>{});
+      }
+    } else if(isAdminContext){
+      if(turningOff) await unsubscribeFromAdminPushNotifications();
+      else await subscribeToAdminPushNotifications();
+    }
   }
 }
 // Flips whether push notifications for this booking play sound/vibrate —
@@ -3203,6 +3323,9 @@ function wireChatNotificationControls(bookingId){
   });
   const silentBtn = document.getElementById('chatNotifSilentToggle');
   if(silentBtn) silentBtn.onclick = () => toggleChatNotificationSilent(bookingId);
+  if(!bookingId && currentAdminUser && chatNotificationPermission === 'granted'){
+    syncAdminPushToggleState();
+  }
 }
 
 function renderChatPanel(bookingId, viewerRole){
@@ -5998,7 +6121,7 @@ function attachHandlers(){
     };
     const chatStagedFileRemoveBtn = $('#chatStagedFileRemoveBtn');
     if(chatStagedFileRemoveBtn) chatStagedFileRemoveBtn.onclick = () => { chatStagedFile = null; render(); };
-    if(bk.id && chatNotificationPermission === 'granted' && chatNotificationsEnabled && !pushAutoResubscribeAttempted[bk.id]){
+    if(bk.id && chatNotificationPermission === 'granted' && chatNotificationsEnabled && !bk.pushDisabled && !pushAutoResubscribeAttempted[bk.id]){
       // A returning visitor who already granted permission before doesn't
       // need to click the toggle again — quietly re-establish (or confirm)
       // the push subscription for this device once per session, so it
