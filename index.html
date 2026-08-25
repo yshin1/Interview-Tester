@@ -1354,7 +1354,7 @@ async function loadAccountSignups(){
 }
 async function saveOneAccountSignup(rec){
   const { id, ...data } = rec;
-  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).set(data);
+  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).set(data);
   const idx = accountSignups.findIndex(x => x.id === id);
   if(idx === -1) accountSignups.push(rec); else accountSignups[idx] = rec;
 }
@@ -1378,7 +1378,7 @@ async function loadDeviceSubmissions(){
 }
 async function saveOneDeviceSubmission(rec){
   const { id, ...data } = rec;
-  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).set(data);
+  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).set(data);
   const idx = deviceSubmissions.findIndex(x => x.id === id);
   if(idx === -1) deviceSubmissions.push(rec); else deviceSubmissions[idx] = rec;
 }
