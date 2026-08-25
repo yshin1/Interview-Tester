@@ -1847,7 +1847,7 @@ function startBookingsPolling(){
       });
     }
     bookings = newBookings;
-    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='tutorList' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplication' || adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='calendar' || adminTab==='list' || adminTab==='secondDemo' || adminTab==='onboarding' || adminTab==='chats' || adminTab==='tutorChats' || adminTab==='tutorList' || adminTab==='resignedTutors' || adminTab==='terminatedTutors' || adminTab==='archiveApplicants' || adminTab==='archiveTutors') && !editingBooking && !cancelTarget && !chatTarget && !notesTarget && !editingSecondDemo && !dayDetailTarget && !signupStatusTarget && !editingTutorChatLabelId && !applicationDetailTarget && !deleteTutorChatTarget && !reapplicationHistoryTarget && !addExistingTutorModalOpen && !isFormControlFocused()){
       render();
     }
   }, err => console.error('Bookings listener error:', err));
@@ -3414,11 +3414,8 @@ const TAB_GROUPS = [
   { label: 'Calendar', tab: 'calendar' },
   { label: 'Applications', tab: 'applications' },
   { label: 'Archive', children: [
-      ['archiveApplication','Application'],
-      ['archive1stDemo','1st Demo'],
-      ['archive2ndDemo','2nd Demo'],
-      ['archiveResigned','Resigned'],
-      ['archiveTerminated','Terminated']
+      ['archiveApplicants','Applicants'],
+      ['archiveTutors','Tutors']
     ]
   },
   { label: 'Demo', children: [
@@ -3478,7 +3475,7 @@ function unreadCountForTabKey(key){
 // device submissions rather than chat messages.
 function newCountForTabKey(key){
   const isNew = r => r.viewedByAdmin === false;
-  if(key === 'applications') return applications.filter(a => !isArchivedApplication(a) && isNew(a)).length;
+  if(key === 'applications') return applications.filter(a => !isArchivedApplication(a) && !hasMovedOnFromApplication(a) && isNew(a)).length;
   if(key === 'list') return bookings.filter(b => b.demoResult !== 'pass' && isNew(b)).length;
   // Excludes bookings that already have a 2nd demo result — once a decision
   // is made they've effectively moved on to onboarding, so they shouldn't
@@ -3562,11 +3559,8 @@ function renderAdmin(){
   else if(adminTab==='resignedTutors') body = renderAdminFormerTutors('resigned');
   else if(adminTab==='terminatedTutors') body = renderAdminFormerTutors('terminated');
   else if(adminTab==='tutorList') body = renderAdminTutorList();
-  else if(adminTab==='archiveApplication') body = renderAdminArchiveApplications();
-  else if(adminTab==='archive1stDemo') body = renderAdminArchive('1stDemo');
-  else if(adminTab==='archive2ndDemo') body = renderAdminArchive('2ndDemo');
-  else if(adminTab==='archiveResigned') body = renderAdminArchive('resigned');
-  else if(adminTab==='archiveTerminated') body = renderAdminArchive('terminated');
+  else if(adminTab==='archiveApplicants') body = renderAdminArchiveApplicants();
+  else if(adminTab==='archiveTutors') body = renderAdminArchiveTutors();
   else if(adminTab==='dates') body = renderAdminDates();
   else if(adminTab==='capacity') body = renderAdminCapacity();
   else if(adminTab==='formBuilderApply') body = renderFormBuilder('apply');
@@ -3788,7 +3782,7 @@ function renderAdminApplications(){
   // Failed applications move to Archive automatically and no longer clutter
   // the active pipeline here — they're still fully viewable under Archive →
   // Application.
-  const activeApplications = applications.filter(a => !isArchivedApplication(a));
+  const activeApplications = applications.filter(a => !isArchivedApplication(a) && !hasMovedOnFromApplication(a));
   if(activeApplications.length === 0){
     return `<div class="card">${shareLinkBox}<div class="empty-state">No applications yet.</div></div>`;
   }
@@ -4622,6 +4616,18 @@ function isArchivedApplication(a){
   return a.result === 'fail';
 }
 
+// True when this person's application passed review, but they later failed
+// their 1st Demo — their application.result correctly stays 'pass' (the
+// application itself was fine, they just didn't perform in the demo), so
+// this is checked separately from isArchivedApplication rather than folded
+// into it. Used only to drop them off the ACTIVE Applications list (they're
+// done, and already tracked in Archive → 1st Demo with a link back to this
+// same application) — never changes what "Archive → Application" shows.
+function hasMovedOnFromApplication(a){
+  const emailNorm = (a.email||'').trim().toLowerCase();
+  return bookings.some(b => (b.email||'').trim().toLowerCase() === emailNorm && b.demoResult === 'fail');
+}
+
 // Gathers every past "archived" event for this email — failed applications,
 // failed demos, resignations, terminations — so admin can see at a glance
 // that someone applying now is a repeat applicant and where they dropped off
@@ -4839,30 +4845,59 @@ function renderAdminTutorList(){
   </div>`;
 }
 
-let archiveSearchQuery = { application: '', '1stDemo': '', '2ndDemo': '', resigned: '', terminated: '' };
+let archiveSearchQuery = { applicants: '', tutors: '' };
 
-function renderAdminArchiveApplications(){
-  const failed = applications.filter(isArchivedApplication);
-  const q = archiveSearchQuery.application.trim().toLowerCase();
-  const filtered = q
-    ? failed.filter(a => (a.fullName||'').toLowerCase().includes(q) || (a.email||'').toLowerCase().includes(q))
-    : failed;
-  const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt||0) - new Date(a.submittedAt||0));
-
-  const emptyMessage = failed.length === 0 ? 'No failed applications on record.' : 'No one matches that search.';
-
-  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(a => {
-    const dateStr = a.submittedAt ? new Date(a.submittedAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+function renderAdminArchiveApplicants(){
+  const entries = [];
+  applications.filter(isArchivedApplication).forEach(a => {
     const matchingBooking = bookings.find(b => (b.email||'').trim().toLowerCase() === (a.email||'').trim().toLowerCase());
+    entries.push({
+      key: 'app_'+a.id, name: a.fullName, email: a.email, stage: 'Application',
+      dateVal: a.submittedAt, viewAppId: a.id, chatId: matchingBooking ? matchingBooking.id : null,
+      restoreAppId: a.id
+    });
+  });
+  bookings.filter(b => b.demoResult === 'fail').forEach(b => {
+    const matchingApp = applications.find(a => (a.email||'').trim().toLowerCase() === (b.email||'').trim().toLowerCase());
+    entries.push({
+      key: '1st_'+b.id, name: b.adminChatLabel || b.fullName, email: b.email, stage: '1st Demo',
+      dateVal: b.date || b.bookedAt, viewAppId: matchingApp ? matchingApp.id : null, chatId: b.id,
+      restoreBookingId: b.id, restoreField: 'demoResult'
+    });
+  });
+  bookings.filter(b => b.secondDemoResult === 'fail').forEach(b => {
+    const matchingApp = applications.find(a => (a.email||'').trim().toLowerCase() === (b.email||'').trim().toLowerCase());
+    entries.push({
+      key: '2nd_'+b.id, name: b.adminChatLabel || b.fullName, email: b.email, stage: '2nd Demo',
+      dateVal: b.secondDemoDate || b.bookedAt, viewAppId: matchingApp ? matchingApp.id : null, chatId: b.id,
+      restoreBookingId: b.id, restoreField: 'secondDemoResult'
+    });
+  });
+
+  const q = archiveSearchQuery.applicants.trim().toLowerCase();
+  const filtered = q
+    ? entries.filter(e => (e.name||'').toLowerCase().includes(q) || (e.email||'').toLowerCase().includes(q))
+    : entries;
+  const sorted = [...filtered].sort((a,b) => new Date(b.dateVal||0) - new Date(a.dateVal||0));
+
+  const stageColors = { 'Application': 'var(--slate)', '1st Demo': 'var(--gold-dark)', '2nd Demo': 'var(--danger)' };
+  const emptyMessage = entries.length === 0 ? 'No dropped applicants on record.' : 'No one matches that search.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(e => {
+    const dateStr = e.dateVal ? new Date(e.dateVal).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    const restoreBtn = e.restoreAppId
+      ? `<button class="btn btn-ghost btn-sm" data-restore-app="${e.restoreAppId}">↩ Restore</button>`
+      : `<button class="btn btn-ghost btn-sm" data-restore-demo="${e.restoreBookingId}" data-restore-field="${e.restoreField}">↩ Restore</button>`;
     return `
     <tr>
-      <td><strong>${escapeHtml(a.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(a.email)}</span></td>
+      <td><strong>${escapeHtml(e.name)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(e.email)}</span></td>
+      <td><span class="unread-badge" style="background:${stageColors[e.stage]};">${e.stage}</span></td>
       <td class="tag">${dateStr}</td>
       <td>
         <div class="row-actions">
-          <button class="btn btn-primary btn-sm" data-view-app="${a.id}">📄 View Application</button>
-          ${matchingBooking ? `<button class="btn btn-ghost btn-sm" data-chat-id="${matchingBooking.id}">💬 Open Chat</button>` : ''}
-          <button class="btn btn-ghost btn-sm" data-restore-app="${a.id}">↩ Restore</button>
+          ${e.viewAppId ? `<button class="btn btn-ghost btn-sm" data-view-app="${e.viewAppId}">📄 View Application</button>` : ''}
+          ${e.chatId ? `<button class="btn btn-primary btn-sm" data-chat-id="${e.chatId}">💬 Open Chat</button>` : ''}
+          ${restoreBtn}
         </div>
       </td>
     </tr>`;
@@ -4870,13 +4905,58 @@ function renderAdminArchiveApplications(){
 
   return `
   <div class="card">
-    <div class="section-title" style="margin-bottom:4px;">Application — Failed</div>
-    <div class="section-desc" style="margin-bottom:14px;">${failed.length} on record${q ? `, ${filtered.length} shown` : ''}</div>
+    <div class="section-title" style="margin-bottom:4px;">Applicants — Dropped Out</div>
+    <div class="section-desc" style="margin-bottom:14px;">${entries.length} on record${q ? `, ${filtered.length} shown` : ''} — didn't pass the application, 1st Demo, or 2nd Demo.</div>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <input type="text" id="archiveAppSearchInput" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery.application)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <input type="text" id="archiveApplicantsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery.applicants)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
     </div>
     <table class="list-table archive-list-table">
-      <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
+      <thead><tr><th>Name</th><th>Stage</th><th>Date</th><th>Manage</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderAdminArchiveTutors(){
+  const entries = bookings
+    .filter(b => b.tutorEmploymentStatus === 'resigned' || b.tutorEmploymentStatus === 'terminated')
+    .map(b => ({
+      id: b.id, name: b.adminChatLabel || b.fullName, email: b.email,
+      stage: b.tutorEmploymentStatus === 'resigned' ? 'Resigned' : 'Terminated',
+      dateVal: b.tutorEmploymentDate
+    }));
+  const q = archiveSearchQuery.tutors.trim().toLowerCase();
+  const filtered = q
+    ? entries.filter(e => (e.name||'').toLowerCase().includes(q) || (e.email||'').toLowerCase().includes(q))
+    : entries;
+  const sorted = [...filtered].sort((a,b) => new Date(b.dateVal||0) - new Date(a.dateVal||0));
+  const emptyMessage = entries.length === 0 ? 'No former tutors on record.' : 'No one matches that search.';
+
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(e => {
+    const dateStr = e.dateVal ? new Date(e.dateVal).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
+    return `
+    <tr>
+      <td><strong>${escapeHtml(e.name)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(e.email)}</span></td>
+      <td><span class="unread-badge" style="background:${e.stage==='Resigned'?'var(--gold-dark)':'var(--danger)'};">${e.stage}</span></td>
+      <td class="tag">${dateStr}</td>
+      <td>
+        <div class="row-actions">
+          <button class="btn btn-primary btn-sm" data-chat-id="${e.id}">💬 Open Chat</button>
+          <button class="btn btn-ghost btn-sm" data-reactivate-tutor="${e.id}">↩ Reactivate</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="card">
+    <div class="section-title" style="margin-bottom:4px;">Tutors — No Longer Active</div>
+    <div class="section-desc" style="margin-bottom:14px;">${entries.length} on record${q ? `, ${filtered.length} shown` : ''}</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+      <input type="text" id="archiveTutorsSearchInput" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery.tutors)}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    </div>
+    <table class="list-table archive-list-table">
+      <thead><tr><th>Name</th><th>Status</th><th>Date</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
@@ -4886,58 +4966,6 @@ function renderAdminArchiveApplications(){
 // recruiting cycle — failed at either demo stage, or tutors who resigned or
 // were let go. Kept separate from Applications so this quarter's pipeline
 // stays uncluttered by past cycles, while still being one click away.
-function renderAdminArchive(category){
-  const config = {
-    '1stDemo': { title: '1st Demo — Failed', filter: b => b.demoResult === 'fail', dateField: null, emptyMsg: 'No one has failed the 1st Demo yet.' },
-    '2ndDemo': { title: '2nd Demo — Failed', filter: b => b.secondDemoResult === 'fail', dateField: null, emptyMsg: 'No one has failed the 2nd Demo yet.' },
-    resigned: { title: 'Resigned Tutors', filter: b => b.tutorEmploymentStatus === 'resigned', dateField: 'tutorEmploymentDate', emptyMsg: 'No resigned tutors on record.' },
-    terminated: { title: 'Terminated Tutors', filter: b => b.tutorEmploymentStatus === 'terminated', dateField: 'tutorEmploymentDate', emptyMsg: 'No terminated tutors on record.' }
-  }[category];
-
-  const all = bookings.filter(config.filter);
-  const q = archiveSearchQuery[category].trim().toLowerCase();
-  const filtered = q
-    ? all.filter(b => (b.fullName||'').toLowerCase().includes(q) || (b.email||'').toLowerCase().includes(q))
-    : all;
-
-  const sorted = [...filtered].sort((a,b) => {
-    const dateA = config.dateField ? a[config.dateField] : a.submittedAt;
-    const dateB = config.dateField ? b[config.dateField] : b.submittedAt;
-    return new Date(dateB||0) - new Date(dateA||0);
-  });
-
-  const emptyMessage = all.length === 0 ? config.emptyMsg : 'No one matches that search.';
-
-  const rows = sorted.length === 0 ? `<tr><td colspan="3" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
-    const dateVal = config.dateField ? b[config.dateField] : b.submittedAt;
-    const dateStr = dateVal ? new Date(dateVal).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
-    const matchingApp = applications.find(a => (a.email||'').trim().toLowerCase() === (b.email||'').trim().toLowerCase());
-    return `
-    <tr>
-      <td><strong>${escapeHtml(b.adminChatLabel || b.fullName)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
-      <td class="tag">${dateStr}</td>
-      <td>
-        <div class="row-actions">
-          ${matchingApp ? `<button class="btn btn-ghost btn-sm" data-view-app="${matchingApp.id}">📄 View Application</button>` : ''}
-          <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
-
-  return `
-  <div class="card">
-    <div class="section-title" style="margin-bottom:4px;">${config.title}</div>
-    <div class="section-desc" style="margin-bottom:14px;">${all.length} on record${q ? `, ${filtered.length} shown` : ''}</div>
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-      <input type="text" id="archiveSearchInput" data-category="${category}" placeholder="Search by name or email…" value="${escapeHtml(archiveSearchQuery[category])}" style="flex:1; min-width:220px; padding:10px 14px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-    </div>
-    <table class="list-table archive-list-table">
-      <thead><tr><th>Name</th><th>Date</th><th>Manage</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
-}
 
 
 function renderAdminSecondDemo(){
@@ -7631,10 +7659,10 @@ Langdy Team`;
       });
     }
 
-    if(adminTab==='archiveApplication'){
-      const searchInput = $('#archiveAppSearchInput');
+    if(adminTab==='archiveApplicants'){
+      const searchInput = $('#archiveApplicantsSearchInput');
       if(searchInput){
-        searchInput.oninput = e => { archiveSearchQuery.application = e.target.value; render(); };
+        searchInput.oninput = e => { archiveSearchQuery.applicants = e.target.value; render(); };
         searchInput.focus();
         searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
       }
@@ -7661,19 +7689,27 @@ Langdy Team`;
           render();
         };
       });
+      $$('[data-restore-demo]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.restoreDemo;
+          const field = el.dataset.restoreField;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const updated = Object.assign({}, bookings[idx], { [field]: '' });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
+          render();
+        };
+      });
     }
 
-    if(adminTab==='archive1stDemo' || adminTab==='archive2ndDemo' || adminTab==='archiveResigned' || adminTab==='archiveTerminated'){
-      const searchInput = $('#archiveSearchInput');
+    if(adminTab==='archiveTutors'){
+      const searchInput = $('#archiveTutorsSearchInput');
       if(searchInput){
-        const category = searchInput.dataset.category;
-        searchInput.oninput = e => { archiveSearchQuery[category] = e.target.value; render(); };
+        searchInput.oninput = e => { archiveSearchQuery.tutors = e.target.value; render(); };
         searchInput.focus();
         searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
       }
-      $$('[data-view-app]').forEach(el=>{
-        el.onclick = () => { applicationDetailTarget = el.dataset.viewApp; markApplicationViewed(applicationDetailTarget); render(); };
-      });
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
           const id = el.dataset.chatId;
@@ -7682,6 +7718,17 @@ Langdy Team`;
           chatDraftText = '';
           render();
           await markChatReadByAdmin(id);
+          render();
+        };
+      });
+      $$('[data-reactivate-tutor]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.reactivateTutor;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null });
+          const next = [...bookings]; next[idx] = updated;
+          await saveBookings(next);
           render();
         };
       });
