@@ -5616,31 +5616,31 @@ function attachHandlers(){
 
   if((view==='signupForm' || view==='deviceForm') && !currentTutorUser){
     const submit = async () => {
-      console.log('[debug] submit() called');
       const email = $('#gsfLoginEmail').value.trim();
       const password = $('#gsfLoginPassword').value;
       tutorLoginEmail = email;
       if(!isValidEmail(email)){ tutorLoginError = 'Please enter a valid email address.'; render(); return; }
       if(!password){ tutorLoginError = 'Please enter your password.'; render(); return; }
-      console.log('[debug] validations passed, about to call signInWithEmailAndPassword');
       tutorLoginBusy = true; tutorLoginError = ''; render();
-      cameFromTutorLink = true; // so the auth-state listener actually processes this sign-in (see its own comment)
+      cameFromTutorLink = true; // so the auth-state listener also processes this sign-in if it does fire
       try{
-        await firebase.auth().signInWithEmailAndPassword(email, password);
-        console.log('[debug] signInWithEmailAndPassword resolved successfully');
-        // onAuthStateChanged (set up in init) picks this up — since view is
-        // 'signupForm'/'deviceForm' it deliberately leaves view alone (see
-        // its own condition), so the next render just shows the form now
-        // that currentTutorUser is set.
+        const cred = await firebase.auth().signInWithEmailAndPassword(email, password);
+        // Set this and re-render ourselves rather than relying only on
+        // onAuthStateChanged — that listener only fires on an actual auth
+        // state CHANGE, so if this browser was already signed in as this
+        // same tutor (e.g. a previous attempt already succeeded), this
+        // call resolves fine but the listener never fires again, and the
+        // UI would otherwise sit on "Signing in…" forever.
+        currentTutorUser = cred.user;
+        tutorLoginBusy = false;
+        render();
       }catch(e){
-        console.log('[debug] signInWithEmailAndPassword threw:', e);
         tutorLoginBusy = false;
         tutorLoginError = 'Incorrect email or password.';
         render();
       }
     };
     const submitBtn = $('#gsfLoginSubmit');
-    console.log('[debug] wiring gsfLoginSubmit, found element:', !!submitBtn);
     if(submitBtn) submitBtn.onclick = submit;
     const pwInput = $('#gsfLoginPassword');
     if(pwInput) pwInput.addEventListener('keydown', e => { if(e.key==='Enter') submit(); });
