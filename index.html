@@ -919,6 +919,7 @@ let config = null;
 let bookings = [];
 let view = 'gate';          // 'gate' | 'book' | 'admin'
 let gateError = '';
+let gateInfoMessage = ''; // shown once, e.g. when auto-bumped to tutor login after admin invites them mid-session
 let gateBusy = false;
 
 let bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
@@ -1655,6 +1656,27 @@ function startChatPolling(bookingId, onTick){
     const freshFields = Object.assign({ id: doc.id }, doc.data());
     if(bookingId === bk.id && typeof freshFields.pushDisabled === 'boolean'){
       chatNotificationsEnabled = !freshFields.pushDisabled;
+    }
+    // Admin inviting them as a tutor (creating their login account) while
+    // they already have this exact chat open live — the applicant session
+    // they're looking at can't be used anymore (the "remembered booking"
+    // restore already refuses to restore once tutorAccountCreated is
+    // true), so rather than leaving them on a chat that silently stops
+    // working, bump them straight to tutor sign-in with an explanation.
+    // Only for their own currently-open session (bookingId === bk.id) and
+    // only if they're not ALREADY signed in as a tutor themselves (that
+    // would be admin or another tutor viewing this booking, not this
+    // applicant's own browser).
+    if(bookingId === bk.id && !currentTutorUser && freshFields.tutorAccountCreated === true && !bk.tutorAccountCreated){
+      stopChatPolling();
+      forgetMyBooking();
+      gateInfoMessage = "🎉 You've been invited as a tutor! Please sign in with the new login info sent to your email.";
+      gateMode = 'tutorLogin';
+      cameFromTutorLink = true;
+      view = 'gate';
+      bk = { step:1, date:null, time:null, fullName:'', email:'', agree1:false, agree2:false, error:'', busy:false, done:false, weekOffset:0 };
+      render();
+      return;
     }
     const idx = bookings.findIndex(b => b.id === bookingId);
     const existingMessages = idx !== -1 ? bookings[idx].messages : undefined;
@@ -2395,12 +2417,15 @@ function renderGate(){
     </div>`;
   }
   if(gateMode === 'tutorLogin'){
+    const infoMsg = gateInfoMessage;
+    gateInfoMessage = '';
     return `
     <div class="center-screen">
       <div class="card gate-card">
         <div class="brand-mark" style="margin-bottom:16px;">L</div>
         <h1 class="gate-title">Tutor Sign In</h1>
         <p class="gate-sub">Sign in with the email and password you set up to see your chat.</p>
+        ${infoMsg ? `<div class="success-text" style="margin-bottom:14px;">${escapeHtml(infoMsg)}</div>` : ''}
         <div class="field">
           <label for="tutorLoginEmailInput">Email</label>
           <input type="email" id="tutorLoginEmailInput" placeholder="you@example.com" autocomplete="username" value="${escapeHtml(tutorLoginEmail)}" ${tutorLoginBusy?'disabled':''}>
