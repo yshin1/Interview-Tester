@@ -5646,7 +5646,7 @@ function attachHandlers(){
           }
         }
         const dupCheckTask = loadApplications().then(() =>
-          applications.some(a => (a.email||'').trim().toLowerCase()===emailNorm && !isArchivedApplication(a))
+          applications.some(a => (a.email||'').trim().toLowerCase()===emailNorm && !isArchivedApplication(a) && !hasMovedOnFromApplication(a))
         );
         const [dupEmail] = await Promise.all([dupCheckTask, ...uploadTasks]);
 
