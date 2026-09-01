@@ -1234,28 +1234,39 @@ async function verifyApplicantCode(code, email){
   const result = await callable({ code, email });
   return (result.data) || { valid: false, reason: 'code' };
 }
+let applicantCodeLoadError = false;
 async function loadApplicantCodeForAdmin(){
+  applicantCodeLoadError = false;
   try{
     const snap = await db.collection('adminSecrets').doc('applicantCode').get();
     applicantCodeAdmin = snap.exists ? (snap.data().code || '') : 'WELCOME2026';
   }catch(e){
     console.error('Failed to load applicant code:', e);
-    applicantCodeAdmin = null;
+    // Deliberately does NOT reset applicantCodeAdmin back to null here —
+    // that was the actual bug: the caller's guard (=== null) would see
+    // "still not loaded" on every re-render and call this again forever,
+    // hammering Firestore with the same failing request in a tight loop
+    // and freezing the rest of the admin UI (including tab navigation)
+    // along with it. applicantCodeLoadError is what the caller checks
+    // instead, so a genuine failure now fails once and stops.
+    applicantCodeLoadError = true;
+  }
+}
+let applicantTestCodeLoadError = false;
+async function loadApplicantTestCodeForAdmin(){
+  applicantTestCodeLoadError = false;
+  try{
+    const snap = await db.collection('adminSecrets').doc('applicantTestCode').get();
+    applicantTestCodeAdmin = snap.exists ? (snap.data().code || '') : '';
+  }catch(e){
+    console.error('Failed to load applicant test code:', e);
+    applicantTestCodeLoadError = true;
   }
 }
 // The separate test code that bypasses the invited-email check (see
 // checkAdminTestCode in functions/index.js) — unset by default, since most
 // admins won't need it and it's a real bypass, not something to enable
 // casually.
-async function loadApplicantTestCodeForAdmin(){
-  try{
-    const snap = await db.collection('adminSecrets').doc('applicantTestCode').get();
-    applicantTestCodeAdmin = snap.exists ? (snap.data().code || '') : '';
-  }catch(e){
-    console.error('Failed to load applicant test code:', e);
-    applicantTestCodeAdmin = null;
-  }
-}
 async function loadBookings(){
   try{
     const snap = await db.collection(BOOKINGS_COLLECTION).get();
@@ -5405,7 +5416,7 @@ function renderAdminCodes(){
     <div class="section-desc">Shared privately with candidates who passed the application, so they can book their 1st demo interview slot. Admin-only, not readable from the public config — anyone who knows it can book a slot.</div>
 
     <div class="field">
-      <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${applicantCodeAdmin==null?'loading…':escapeHtml(applicantCodeAdmin)})</span></label>
+      <label>New Applicant Code <span style="color:var(--slate-light); font-weight:400;">(current: ${applicantCodeLoadError ? `<span style="color:var(--danger);">failed to load</span> — <button class="link-btn" id="retryApplicantCodeBtn" style="font-size:inherit; padding:0; text-decoration:underline;">retry</button>` : applicantCodeAdmin==null?'loading…':escapeHtml(applicantCodeAdmin)})</span></label>
       <input type="text" id="newApplicantInput" placeholder="Leave blank to keep unchanged" value="${escapeHtml(s.newApplicant)}">
     </div>
     ${s.error ? `<div class="error-text">${escapeHtml(s.error)}</div>` : ''}
@@ -6407,7 +6418,7 @@ function attachHandlers(){
     }
 
     if(adminTab==='applications'){
-      if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
+      if(applicantCodeAdmin === null && !applicantCodeLoadError) loadApplicantCodeForAdmin().then(render);
       const exportBtn = $('#exportApplicationsExcelBtn');
       if(exportBtn) exportBtn.onclick = () => {
         exportSubmissionsToExcel(applications, formSchemas.apply || APPLY_FORM_DEFAULT_SCHEMA, 'Langdy_Applications');
@@ -7332,8 +7343,10 @@ Langdy Team`;
     }
 
     if(adminTab==='codes'){
-      if(applicantCodeAdmin === null) loadApplicantCodeForAdmin().then(render);
-      if(applicantTestCodeAdmin === null) loadApplicantTestCodeForAdmin().then(render);
+      if(applicantCodeAdmin === null && !applicantCodeLoadError) loadApplicantCodeForAdmin().then(render);
+      if(applicantTestCodeAdmin === null && !applicantTestCodeLoadError) loadApplicantTestCodeForAdmin().then(render);
+      const retryCodeBtn = $('#retryApplicantCodeBtn');
+      if(retryCodeBtn) retryCodeBtn.onclick = () => { applicantCodeLoadError = false; loadApplicantCodeForAdmin().then(render); };
       $('#newApplicantInput').oninput = e => { codeChangeState.newApplicant = e.target.value; };
       $('#codeSaveBtn').onclick = async () => {
         const s = codeChangeState;
