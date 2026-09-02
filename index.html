@@ -3651,7 +3651,7 @@ function renderAdminCalendar(){
     const total = firstDemoBookings.length + secondDemoBookings.length;
 
     const firstChips = firstDemoBookings.slice(0,CHIP_CAP).map(b=>
-      `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT">${b.time} ${escapeHtml(b.fullName)}</span>`
+      `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT${b.isTestBooking?' (TEST — admin code, does not use real capacity)':''}" style="${b.isTestBooking?'opacity:0.65; border-style:dashed;':''}">${b.isTestBooking?'🧪 ':''}${b.time} ${escapeHtml(b.fullName)}</span>`
     ).join('');
     const secondChips = secondDemoBookings.slice(0, Math.max(0,CHIP_CAP-firstDemoBookings.length)).map(b=>
       `<span class="cal-chip" data-2nd-schedule-id="${b.id}" style="background:var(--gold-bg); border-color:var(--gold-dark);" title="2nd Demo — ${escapeHtml(b.fullName)} ${b.secondDemoTime||''} KST">🅱 ${b.secondDemoTime||'?'} ${escapeHtml(b.fullName)}</span>`
@@ -4308,7 +4308,7 @@ function renderAdminList(){
     const unread = unreadCountForAdmin(b);
     return `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(b.fullName)}</strong>${b.isTestBooking?' <span style="font-size:10px; color:var(--slate-light); font-weight:700; border:1px solid var(--line); border-radius:4px; padding:1px 5px;">🧪 TEST</span>':''}${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td class="mobile-hide tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
       <td class="tag"><span class="td-mobile-label">Date</span>${fmtDateLabel(b.date)}</td>
       <td class="tag"><span class="td-mobile-label">Time (PH)</span>${b.time}</td>
