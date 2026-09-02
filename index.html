@@ -1366,7 +1366,7 @@ let accountSignups = [];
 const ACCOUNT_SIGNUPS_COLLECTION = 'accountSignups';
 async function loadAccountSignups(){
   try{
-    const snap = await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).get();
+    const snap = await db.collection(ACCOUNT_SIGNUPS_COLLECTION).get();
     accountSignups = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     accountSignups = [];
@@ -1382,7 +1382,7 @@ async function saveOneAccountSignup(rec){
 async function deleteOneAccountSignup(id){
   const record = accountSignups.find(x => x.id === id);
   await deleteAttachedFiles(record);
-  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
+  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).delete();
   accountSignups = accountSignups.filter(x => x.id !== id);
 }
 
@@ -1390,7 +1390,7 @@ let deviceSubmissions = [];
 const DEVICE_SUBMISSIONS_COLLECTION = 'deviceSubmissions';
 async function loadDeviceSubmissions(){
   try{
-    const snap = await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).get();
+    const snap = await db.collection(DEVICE_SUBMISSIONS_COLLECTION).get();
     deviceSubmissions = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
   }catch(e){
     deviceSubmissions = [];
@@ -1406,7 +1406,7 @@ async function saveOneDeviceSubmission(rec){
 async function deleteOneDeviceSubmission(id){
   const record = deviceSubmissions.find(x => x.id === id);
   await deleteAttachedFiles(record);
-  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
+  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).delete();
   deviceSubmissions = deviceSubmissions.filter(x => x.id !== id);
 }
 
@@ -1794,7 +1794,7 @@ let signupsListenerActive = false;
 function startSignupsPolling(){
   if(signupsListenerActive) return;
   signupsListenerActive = true;
-  signupsUnsubscribe = adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).onSnapshot(snap => {
+  signupsUnsubscribe = db.collection(ACCOUNT_SIGNUPS_COLLECTION).onSnapshot(snap => {
     accountSignups = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && adminTab==='accountSignups' && !accountSignupDetailTarget && !deleteAccountSignupTarget && !isFormControlFocused()){
       render();
@@ -1812,7 +1812,7 @@ let deviceListenerActive = false;
 function startDevicePolling(){
   if(deviceListenerActive) return;
   deviceListenerActive = true;
-  deviceUnsubscribe = adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).onSnapshot(snap => {
+  deviceUnsubscribe = db.collection(DEVICE_SUBMISSIONS_COLLECTION).onSnapshot(snap => {
     deviceSubmissions = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
     if(view==='admin' && adminTab==='deviceSubmissions' && !deviceSubmissionDetailTarget && !deleteDeviceSubmissionTarget && !isFormControlFocused()){
       render();
@@ -2040,6 +2040,12 @@ function getRememberedBookingId(){
 function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Marks a test booking's name — small "A" badge in the same orange as the
+// real Langdy logo, plus a full-name highlight, so it reads clearly at a
+// glance without cluttering the row the way a text tag did.
+function renderTestNameBadge(name){
+  return `<span style="display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:4px; background:var(--brand-orange); color:#fff; font-size:10px; font-weight:800; margin-right:5px; vertical-align:middle;">A</span><mark style="background:#FFE3D1; color:inherit; padding:0 3px; border-radius:3px;">${escapeHtml(name)}</mark>`;
+}
 function isValidEmail(v){ return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test((v||'').trim()); }
 // Small "NEW" badge for anything the admin hasn't opened/looked at yet —
 // applications, account signups, device submissions, and fresh bookings.
@@ -2058,14 +2064,15 @@ async function markApplicationViewed(id){
 }
 async function markAccountSignupViewed(id){
   const s = accountSignups.find(x => x.id === id);
-  if(!s || s.viewedByAdmin === true) return;
-  await adminDb.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  if(!s || (s.viewedByAdmin === true && s.reviewed === true)) return;
+  await db.collection(ACCOUNT_SIGNUPS_COLLECTION).doc(id).update({ viewedByAdmin: true, reviewed: true });
   s.viewedByAdmin = true;
+  s.reviewed = true;
 }
 async function markDeviceSubmissionViewed(id){
   const d = deviceSubmissions.find(x => x.id === id);
   if(!d || d.viewedByAdmin === true) return;
-  await adminDb.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).update({ viewedByAdmin: true });
+  await db.collection(DEVICE_SUBMISSIONS_COLLECTION).doc(id).update({ viewedByAdmin: true });
   d.viewedByAdmin = true;
 }
 async function markBookingViewed(id){
@@ -3651,7 +3658,7 @@ function renderAdminCalendar(){
     const total = firstDemoBookings.length + secondDemoBookings.length;
 
     const firstChips = firstDemoBookings.slice(0,CHIP_CAP).map(b=>
-      `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT${b.isTestBooking?' (TEST — admin code, does not use real capacity)':''}" style="${b.isTestBooking?'opacity:0.65; border-style:dashed;':''}">${b.isTestBooking?'🧪 ':''}${b.time} ${escapeHtml(b.fullName)}</span>`
+      `<span class="cal-chip" data-edit-id="${b.id}" title="1st Demo — ${escapeHtml(b.fullName)} ${b.time} PHT${b.isTestBooking?' (TEST — admin code, does not use real capacity)':''}">${b.isTestBooking?renderTestNameBadge(b.time+' '+b.fullName):b.time+' '+escapeHtml(b.fullName)}</span>`
     ).join('');
     const secondChips = secondDemoBookings.slice(0, Math.max(0,CHIP_CAP-firstDemoBookings.length)).map(b=>
       `<span class="cal-chip" data-2nd-schedule-id="${b.id}" style="background:var(--gold-bg); border-color:var(--gold-dark);" title="2nd Demo — ${escapeHtml(b.fullName)} ${b.secondDemoTime||''} KST">🅱 ${b.secondDemoTime||'?'} ${escapeHtml(b.fullName)}</span>`
@@ -4157,9 +4164,15 @@ function renderAccountSignupDetailModal(){
       ${row('KakaoTalk notifications on?', s.qKakaoNotifEnabled)}
       ${row('Langdy app installed?', s.qLangdyInstalled)}
       ${row('Langdy notifications on?', s.qLangdyNotifEnabled)}
+      <div class="field">
+        <label>Account Status</label>
+        <select id="signupDetailAccountStatus" style="padding:9px 12px; border:1.5px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit;">
+          <option value="" ${!s.accountCreationStatus?'selected':''}>—</option>
+          ${ACCOUNT_CREATION_STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.accountCreationStatus===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="signupDetailCloseBtn">Close</button>
-        <button class="btn btn-primary" id="signupMarkReviewedBtn">${s.reviewed?'Mark as New':'Mark as Reviewed'}</button>
       </div>
     </div>
   </div>`;
@@ -4308,7 +4321,7 @@ function renderAdminList(){
     const unread = unreadCountForAdmin(b);
     return `
     <tr>
-      <td><strong>${escapeHtml(b.fullName)}</strong>${b.isTestBooking?' <span style="font-size:10px; color:var(--slate-light); font-weight:700; border:1px solid var(--line); border-radius:4px; padding:1px 5px;">🧪 TEST</span>':''}${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${b.isTestBooking ? renderTestNameBadge(b.fullName) : escapeHtml(b.fullName)}</strong>${renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
       <td class="mobile-hide tag">${new Date(b.bookedAt).toLocaleString('en-US')}</td>
       <td class="tag"><span class="td-mobile-label">Date</span>${fmtDateLabel(b.date)}</td>
       <td class="tag"><span class="td-mobile-label">Time (PH)</span>${b.time}</td>
@@ -6613,10 +6626,10 @@ Langdy Team`;
       if(accountSignupDetailTarget){
         $('#signupDetailCloseBtn').onclick = () => { accountSignupDetailTarget=null; render(); };
         $('#signupDetailOverlay').onclick = (e) => { if(e.target.id==='signupDetailOverlay'){ accountSignupDetailTarget=null; render(); } };
-        $('#signupMarkReviewedBtn').onclick = async () => {
+        $('#signupDetailAccountStatus').onchange = async (e) => {
           const s = accountSignups.find(x=>x.id===accountSignupDetailTarget);
           if(!s) return;
-          const updated = Object.assign({}, s, { reviewed: !s.reviewed });
+          const updated = Object.assign({}, s, { accountCreationStatus: e.target.value });
           await saveOneAccountSignup(updated);
           render();
         };
