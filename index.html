@@ -3465,6 +3465,19 @@ function findTabGroup(tab){
   }
   return TAB_GROUPS[0];
 }
+function isValidAdminTabKey(key){
+  return TAB_GROUPS.some(g => g.tab === key || (g.children && g.children.some(([k]) => k === key)));
+}
+// Keeps the URL in sync with whichever admin tab is showing — lets the
+// browser's own back/forward buttons step through tab history, and makes
+// a specific tab bookmarkable/shareable instead of every tab looking like
+// the same bare ?admin link.
+function syncAdminTabUrl(){
+  const url = new URL(window.location.href);
+  url.searchParams.set('admin', '');
+  url.searchParams.set('tab', adminTab);
+  history.pushState({ adminTab }, '', url.toString());
+}
 
 function unreadCountForTabKey(key){
   if(key === 'chats'){
@@ -6372,10 +6385,10 @@ function attachHandlers(){
 
   if(view==='admin'){
     $$('[data-group-tab]').forEach(el=>{
-      el.onclick = () => { adminTab = el.dataset.groupTab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+      el.onclick = () => { adminTab = el.dataset.groupTab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; syncAdminTabUrl(); render(); };
     });
     $$('[data-tab]').forEach(el=>{
-      el.onclick = () => { adminTab = el.dataset.tab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; render(); };
+      el.onclick = () => { adminTab = el.dataset.tab; adminSidebarOpen = false; codeChangeState.error=''; codeChangeState.success=''; capacitySaved=false; syncAdminTabUrl(); render(); };
     });
     const mobileMenuBtn = $('#adminMobileMenuBtn');
     if(mobileMenuBtn) mobileMenuBtn.onclick = () => { adminSidebarOpen = true; render(); };
@@ -7928,7 +7941,11 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
   if(params.has('apply')) view = 'apply';
   else if(params.has('signup')) view = 'signupForm';
   else if(params.has('device')) view = 'deviceForm';
-  else if(params.has('admin')){ gateMode = 'adminLogin'; cameFromAdminLink = true; }
+  else if(params.has('admin')){
+    gateMode = 'adminLogin'; cameFromAdminLink = true;
+    const requestedTab = params.get('tab');
+    if(requestedTab && isValidAdminTabKey(requestedTab)) adminTab = requestedTab;
+  }
   else if(params.has('tutor')){ gateMode = 'tutorLogin'; cameFromTutorLink = true; }
   await Promise.all([loadConfig(), loadBookings(), loadFormSchemas(), loadFormImages()]);
 
@@ -8020,6 +8037,7 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
             console.error('Failed to load admin data after sign-in:', e);
           }
           view = 'admin';
+          syncAdminTabUrl();
         }
       } else {
         adminLoginBusy = false;
@@ -8090,6 +8108,21 @@ document.addEventListener('visibilitychange', checkAndMarkApplicantChatRead);
 
   render();
 })();
+
+// Lets the browser's back/forward buttons step through admin tab history
+// (each tab click pushed its own entry via syncAdminTabUrl) — only acts
+// when actually viewing the admin panel, so it doesn't interfere with
+// back/forward on the applicant/tutor side of the app.
+window.addEventListener('popstate', () => {
+  if(view !== 'admin') return;
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get('tab');
+  if(tab && isValidAdminTabKey(tab)){
+    adminTab = tab;
+    adminSidebarOpen = false;
+    render();
+  }
+});
 </script>
 </body>
 </html>
