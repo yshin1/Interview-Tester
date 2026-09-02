@@ -3831,10 +3831,11 @@ function renderAdminApplications(){
     const hasBooked = bookings.some(b => (b.email||'').trim().toLowerCase() === (a.email||'').trim().toLowerCase());
     const daysSinceInvite = a.invitedAt ? (Date.now() - new Date(a.invitedAt).getTime()) / 86400000 : null;
     const isExpired = a.invited && !hasBooked && daysSinceInvite != null && daysSinceInvite > 30;
+    const invitedDateStr = a.invitedAt ? new Date(a.invitedAt).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : null;
     const invitedCell = isExpired
       ? `<span style="font-size:11px; color:var(--danger); font-weight:700; display:block; margin-bottom:4px;">⏰ Expired</span><button class="btn btn-ghost btn-sm" data-invite-app="${a.id}" style="width:auto; padding:5px 10px; font-size:11px;">Re-invite</button>`
       : a.invited
-        ? '<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>'
+        ? `<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>${invitedDateStr ? `<br><span style="font-size:10px; color:var(--slate-light);">${invitedDateStr}</span>` : ''}`
         : `<button class="btn btn-primary btn-sm" data-invite-app="${a.id}">✉️ Invite</button>`;
     return `
     <tr>
@@ -6531,6 +6532,15 @@ Langdy Team`;
           const id = el.dataset.inviteApp;
           const a = applications.find(x=>x.id===id);
           if(!a) return;
+          if(applicantCodeAdmin == null){
+            el.disabled = true; const origText = el.textContent; el.textContent = 'Loading code…';
+            await loadApplicantCodeForAdmin();
+            el.disabled = false; el.textContent = origText;
+            if(applicantCodeAdmin == null){
+              alert('The access code failed to load, so no email was sent. Check your connection (or try logging out and back in) and try again.');
+              return;
+            }
+          }
           const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(a.email)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody(a.fullName))}`;
           window.open(gmailUrl, '_blank');
           await saveOneApplication(Object.assign({}, a, { invited:true, invitedAt: new Date().toISOString() }));
@@ -6543,6 +6553,15 @@ Langdy Team`;
         const ids = [...selectedApplicationIds];
         const selected = applications.filter(a => ids.includes(a.id));
         if(selected.length === 0) return;
+        if(applicantCodeAdmin == null){
+          const origText = bulkBtn.textContent; bulkBtn.disabled = true; bulkBtn.textContent = 'Loading code…';
+          await loadApplicantCodeForAdmin();
+          bulkBtn.disabled = false; bulkBtn.textContent = origText;
+          if(applicantCodeAdmin == null){
+            alert('The access code failed to load, so no emails were sent. Check your connection (or try logging out and back in) and try again.');
+            return;
+          }
+        }
         const emails = selected.map(a => a.email).join(',');
         const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(inviteSubject)}&body=${encodeURIComponent(buildInviteBody('there'))}`;
         window.open(gmailUrl, '_blank');
