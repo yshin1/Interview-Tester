@@ -1089,6 +1089,15 @@ async function inviteTutorAccount(email){
   return tempPassword;
 }
 
+// Disables (or re-enables) a tutor's login entirely — used when someone
+// resigns or is let go, without deleting their account or chat history.
+// Needs Admin SDK privileges no client call can grant itself, hence a
+// Cloud Function (setTutorAccountDisabled in functions/index.js).
+async function setTutorAccountDisabled(email, disabled){
+  const callable = fbFunctions.httpsCallable('setTutorAccountDisabled');
+  await callable({ email, disabled });
+}
+
 async function uploadApplicationFile(file, applicationId, fieldName){
   return uploadEntityFile(file, 'applications', applicationId, fieldName);
 }
@@ -4804,14 +4813,18 @@ function renderAdminFormerTutors(status){
   const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">${emptyMessage}</td></tr>` : sorted.map(b => {
     const displayLabel = b.adminChatLabel || b.fullName;
     const dateVal = b.tutorEmploymentDate ? new Date(b.tutorEmploymentDate).toISOString().slice(0,10) : '';
+    const isDisabled = !!b.tutorAccountDisabled;
     return `
     <tr>
-      <td><strong>${escapeHtml(displayLabel)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
+      <td><strong>${escapeHtml(displayLabel)}</strong>${isDisabled ? '<br><span style="font-size:10.5px; color:var(--danger); font-weight:700;">🔒 Login disabled</span>' : ''}<br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(b.email)}</span></td>
       <td><span class="td-mobile-label">Date</span><input type="date" data-employment-date="${b.id}" value="${dateVal}" style="padding:7px 8px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;"></td>
       <td><span class="td-mobile-label">Note</span><textarea data-employment-note="${b.id}" placeholder="Reason / notes (optional)" rows="1" class="auto-grow-textarea" style="width:100%; min-width:160px; min-height:38px; height:38px; overflow:hidden; resize:vertical; padding:7px 10px; border:1.5px solid var(--line); border-radius:7px; font-size:12.5px; font-family:inherit;">${escapeHtml(b.tutorEmploymentNote||'')}</textarea></td>
       <td>
         <div class="row-actions">
           <button class="btn btn-primary btn-sm" data-chat-id="${b.id}">💬 Open Chat</button>
+          ${isDisabled
+            ? `<button class="btn btn-ghost btn-sm" data-enable-login="${b.id}">🔓 Enable Login</button>`
+            : `<button class="btn btn-danger-outline btn-sm" data-disable-login="${b.id}">🔒 Disable Login</button>`}
           <button class="btn btn-ghost btn-sm" data-reactivate-tutor="${b.id}">↩ Reactivate</button>
         </div>
       </td>
@@ -4957,7 +4970,7 @@ function renderAdminArchiveTutors(){
     .map(b => ({
       id: b.id, name: b.adminChatLabel || b.fullName, email: b.email,
       stage: b.tutorEmploymentStatus === 'resigned' ? 'Resigned' : 'Terminated',
-      dateVal: b.tutorEmploymentDate
+      dateVal: b.tutorEmploymentDate, disabled: !!b.tutorAccountDisabled
     }));
   const q = archiveSearchQuery.tutors.trim().toLowerCase();
   const filtered = q
@@ -4970,7 +4983,7 @@ function renderAdminArchiveTutors(){
     const dateStr = e.dateVal ? new Date(e.dateVal).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '—';
     return `
     <tr>
-      <td><strong>${escapeHtml(e.name)}</strong><br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(e.email)}</span></td>
+      <td><strong>${escapeHtml(e.name)}</strong>${e.disabled ? '<br><span style="font-size:10.5px; color:var(--danger); font-weight:700;">🔒 Login disabled</span>' : ''}<br><span style="color:var(--slate-light); font-size:11px;">${escapeHtml(e.email)}</span></td>
       <td><span class="unread-badge" style="background:${e.stage==='Resigned'?'var(--gold-dark)':'var(--danger)'};">${e.stage}</span></td>
       <td class="tag">${dateStr}</td>
       <td>
@@ -5723,7 +5736,9 @@ function attachHandlers(){
         render();
       }catch(e){
         tutorLoginBusy = false;
-        tutorLoginError = 'Incorrect email or password.';
+        tutorLoginError = e.code === 'auth/user-disabled'
+          ? 'This account has been disabled. Please contact Langdy support.'
+          : 'Incorrect email or password.';
         render();
       }
     };
@@ -6032,9 +6047,11 @@ function attachHandlers(){
           clearTimeout(signInTimeoutId);
           if(timedOut) return;
           tutorLoginBusy = false;
-          const friendly = (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
-            ? 'Incorrect email or password.'
-            : 'Something went wrong signing in. Please try again.';
+          const friendly = e.code === 'auth/user-disabled'
+            ? 'This account has been disabled. Please contact Langdy support.'
+            : (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found')
+              ? 'Incorrect email or password.'
+              : 'Something went wrong signing in. Please try again.';
           tutorLoginError = `${friendly} (${e.code || 'unknown error'})`;
           console.error('TUTOR LOGIN ERROR:', e);
           render();
@@ -6914,10 +6931,55 @@ Langdy Team`;
           const id = el.dataset.reactivateTutor;
           const idx = bookings.findIndex(x=>x.id===id);
           if(idx === -1) return;
-          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null });
+          const wasDisabled = !!bookings[idx].tutorAccountDisabled;
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null, tutorAccountDisabled: false });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
+          if(wasDisabled){
+            try{ await setTutorAccountDisabled(bookings[idx].email, false); }catch(e){ console.error('Failed to re-enable login on reactivate:', e); }
+          }
           render();
+        };
+      });
+      $$('[data-disable-login]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.disableLogin;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const b = bookings[idx];
+          if(!confirm(`Disable login for ${b.adminChatLabel || b.fullName}?\n\nThey won't be able to sign in until you re-enable it. Their chat history and data stay intact.`)) return;
+          el.disabled = true; el.textContent = 'Disabling…';
+          try{
+            await setTutorAccountDisabled(b.email, true);
+            const updated = Object.assign({}, b, { tutorAccountDisabled: true });
+            const next = [...bookings]; next[idx] = updated;
+            await saveBookings(next);
+            render();
+          }catch(e){
+            console.error('Failed to disable login:', e);
+            alert('Something went wrong disabling this account. Please try again.');
+            el.disabled = false; el.textContent = '🔒 Disable Login';
+          }
+        };
+      });
+      $$('[data-enable-login]').forEach(el=>{
+        el.onclick = async () => {
+          const id = el.dataset.enableLogin;
+          const idx = bookings.findIndex(x=>x.id===id);
+          if(idx === -1) return;
+          const b = bookings[idx];
+          el.disabled = true; el.textContent = 'Enabling…';
+          try{
+            await setTutorAccountDisabled(b.email, false);
+            const updated = Object.assign({}, b, { tutorAccountDisabled: false });
+            const next = [...bookings]; next[idx] = updated;
+            await saveBookings(next);
+            render();
+          }catch(e){
+            console.error('Failed to enable login:', e);
+            alert('Something went wrong enabling this account. Please try again.');
+            el.disabled = false; el.textContent = '🔓 Enable Login';
+          }
         };
       });
       $$('[data-employment-date]').forEach(el=>{
@@ -7155,6 +7217,7 @@ Langdy Team`;
           const id = el.dataset.inviteTutorId;
           const b = bookings.find(x=>x.id===id);
           if(!b || !b.email) return;
+          if(!confirm(`Create a tutor login for ${b.fullName} (${b.email}) now?\n\nThis creates their account immediately — it isn't just a draft email.`)) return;
           el.disabled = true; el.textContent = 'Inviting…';
           try{
             const tempPassword = await inviteTutorAccount(b.email);
@@ -7767,9 +7830,13 @@ Langdy Team`;
           const id = el.dataset.reactivateTutor;
           const idx = bookings.findIndex(x=>x.id===id);
           if(idx === -1) return;
-          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null });
+          const wasDisabled = !!bookings[idx].tutorAccountDisabled;
+          const updated = Object.assign({}, bookings[idx], { tutorEmploymentStatus: 'active', tutorEmploymentDate: null, tutorAccountDisabled: false });
           const next = [...bookings]; next[idx] = updated;
           await saveBookings(next);
+          if(wasDisabled){
+            try{ await setTutorAccountDisabled(bookings[idx].email, false); }catch(e){ console.error('Failed to re-enable login on reactivate:', e); }
+          }
           render();
         };
       });
