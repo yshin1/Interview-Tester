@@ -308,6 +308,7 @@
   .match-tag.yes{ color:var(--success); border-color:#BFE3D2; }
   .match-tag.yes .icon{ color:var(--success); }
   .match-tag.no .icon{ color:var(--danger); }
+  .fb-drag-handle:active{ cursor:grabbing; }
 
   /* ---------- table ---------- */
   table.list-table{ width:100%; border-collapse:collapse; font-size:13.5px; }
@@ -3911,8 +3912,7 @@ function renderAdminApplications(){
           ${matchTag('Evening', a.weekdayEvening==='Yes')}
           ${(() => {
             const isHS = a.education === 'High school';
-            const label = a.education ? (isHS ? 'High school' : 'Degree') : 'Education';
-            return matchTag(label, !isHS && !!a.education);
+            return matchTag(a.education || 'Education', !isHS && !!a.education);
           })()}
         </div>
       </td>
@@ -3952,11 +3952,11 @@ function renderAdminApplications(){
         <option value="morning" ${applicationFilterAvailability==='morning'?'selected':''}>Morning 5–7 AM (${activeApplications.filter(a=>a.availMorningPH==='Yes').length})</option>
         <option value="evening" ${applicationFilterAvailability==='evening'?'selected':''}>Evening (${activeApplications.filter(a=>a.weekdayEvening==='Yes').length})</option>
       </select>
-      <label style="margin:0; white-space:nowrap;">Invited</label>
-      <select id="appFilterInvited" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${activeApplications.length})</option>
-        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${activeApplications.filter(a=>a.invited).length})</option>
-        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${activeApplications.filter(a=>!a.invited).length})</option>
+      <label style="margin:0; white-space:nowrap;">Education</label>
+      <select id="appFilterEducation" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterEducation==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="college" ${applicationFilterEducation==='college'?'selected':''}>College+ (${activeApplications.filter(a=>a.education && a.education!=='High school').length})</option>
+        <option value="highschool" ${applicationFilterEducation==='highschool'?'selected':''}>High school (${activeApplications.filter(a=>a.education==='High school').length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Result</label>
       <select id="appFilterResult" style="max-width:160px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -3964,11 +3964,11 @@ function renderAdminApplications(){
         <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
         <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
       </select>
-      <label style="margin:0; white-space:nowrap;">Education</label>
-      <select id="appFilterEducation" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="all" ${applicationFilterEducation==='all'?'selected':''}>All (${activeApplications.length})</option>
-        <option value="college" ${applicationFilterEducation==='college'?'selected':''}>College+ (${activeApplications.filter(a=>a.education && a.education!=='High school').length})</option>
-        <option value="highschool" ${applicationFilterEducation==='highschool'?'selected':''}>High school (${activeApplications.filter(a=>a.education==='High school').length})</option>
+      <label style="margin:0; white-space:nowrap;">Invited</label>
+      <select id="appFilterInvited" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${activeApplications.filter(a=>a.invited).length})</option>
+        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${activeApplications.filter(a=>!a.invited).length})</option>
       </select>
     </div>
     <table class="list-table app-list-table">
@@ -5457,9 +5457,10 @@ function renderFormBuilder(formKey){
   const formLabel = formKey==='apply' ? 'Apply' : formKey==='device' ? 'Device Submission' : 'Account Signup';
 
   const rows = draft.map((field, i) => `
-    <div class="card" style="margin-bottom:10px; padding:14px;">
+    <div class="card" data-fb-card="${i}" style="margin-bottom:10px; padding:14px; transition:border-color .1s;">
       <div style="display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;">
-        <span style="flex-shrink:0; width:28px; height:36px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--slate-light);">#${i+1}</span>
+        <span class="fb-drag-handle" draggable="true" data-fb-drag="${i}" title="Drag to reorder" style="cursor:grab; flex-shrink:0; width:22px; height:36px; display:flex; align-items:center; justify-content:center; color:var(--slate-light); font-size:17px; user-select:none;">⠿</span>
+        <span style="flex-shrink:0; width:22px; height:36px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:var(--slate-light);">#${i+1}</span>
         <select data-fb-type="${i}" style="padding:9px 10px; border:1.5px solid var(--line); border-radius:8px; font-size:12.5px; font-family:inherit;">
           ${Object.entries(FIELD_TYPE_LABELS).map(([t,label])=>`<option value="${t}" ${field.type===t?'selected':''}>${label}</option>`).join('')}
         </select>
@@ -5490,7 +5491,7 @@ function renderFormBuilder(formKey){
   return `
   <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
-      <p class="section-desc" style="margin:0;">Edit the questions shown on the <strong>${formLabel}</strong> form (<code>?${formKey}</code>). Add, remove, reorder, or rename fields. Changes only take effect on the live form after you click "Save Changes" below.</p>
+      <p class="section-desc" style="margin:0;">Edit the questions shown on the <strong>${formLabel}</strong> form (<code>?${formKey}</code>). Add, remove, rename, or reorder fields — drag the <strong>⠿</strong> handle, or use ↑/↓. Changes only take effect on the live form after you click "Save Changes" below.</p>
       <button class="btn btn-ghost btn-sm" id="fbTogglePreviewBtn" style="width:auto; padding:9px 16px; white-space:nowrap;">${formBuilderPreviewOpen[formKey] ? '✕ Hide preview' : '👁 Show preview'}</button>
     </div>
     ${formBuilderPreviewOpen[formKey] ? renderFormPreview(formKey, draft) : ''}
@@ -7507,6 +7508,38 @@ Langdy Team`;
           formBuilderSavedFlash[formKey] = false;
           render();
         };
+      });
+      let fbDragSrcIndex = null;
+      $$('[data-fb-drag]').forEach(el=>{
+        el.addEventListener('dragstart', (e) => {
+          fbDragSrcIndex = Number(el.dataset.fbDrag);
+          e.dataTransfer.effectAllowed = 'move';
+          // Firefox requires setData to actually be a valid drag source
+          e.dataTransfer.setData('text/plain', String(fbDragSrcIndex));
+        });
+      });
+      $$('[data-fb-card]').forEach(cardEl=>{
+        cardEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          cardEl.style.borderColor = 'var(--navy)';
+          cardEl.style.borderWidth = '2px';
+        });
+        cardEl.addEventListener('dragleave', () => {
+          cardEl.style.borderColor = '';
+          cardEl.style.borderWidth = '';
+        });
+        cardEl.addEventListener('drop', (e) => {
+          e.preventDefault();
+          cardEl.style.borderColor = '';
+          cardEl.style.borderWidth = '';
+          const targetIndex = Number(cardEl.dataset.fbCard);
+          if(fbDragSrcIndex === null || fbDragSrcIndex === targetIndex) return;
+          const [moved] = draft.splice(fbDragSrcIndex, 1);
+          draft.splice(targetIndex, 0, moved);
+          fbDragSrcIndex = null;
+          formBuilderSavedFlash[formKey] = false;
+          render();
+        });
       });
       $$('[data-fb-delete]').forEach(el=>{
         el.onclick = () => {
