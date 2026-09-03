@@ -300,11 +300,12 @@
   .cal-mobile-count{ font-size:12.5px; font-weight:700; color:var(--navy); cursor:pointer; }
   .td-mobile-label{ display:none; }
   .match-tag{
-    display:inline-flex; align-items:center; gap:5px; padding:4px 9px;
-    border:1px solid var(--line); border-radius:7px; font-size:11px; font-weight:600;
+    display:inline-flex; align-items:center; gap:5px; padding:5px 10px;
+    border:1px solid var(--line); border-radius:7px; font-size:12.5px; font-weight:600;
     color:var(--ink); background:#fff; white-space:nowrap;
   }
-  .match-tag .icon{ font-size:11px; }
+  .match-tag .icon{ font-size:12.5px; }
+  .match-tag.yes{ color:var(--success); border-color:#BFE3D2; }
   .match-tag.yes .icon{ color:var(--success); }
   .match-tag.no .icon{ color:var(--danger); }
 
@@ -798,6 +799,7 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'workedBefore', type:'yesno', label:'Worked at Langdy before'},
   {id:'interviewedBefore', type:'yesno', label:'Interviewed before'},
   {id:'email', type:'email', label:'Email Address'},
+  {id:'hasKakaoAccount', type:'yesno', label:'Do you have a KakaoTalk account?'},
   {id:'section_background', type:'section', label:'Background'},
   {id:'education', type:'select', label:'Education', options: EDUCATION_OPTIONS},
   {id:'certification', type:'text', label:'Certification'},
@@ -807,7 +809,6 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'weekdayEvening', type:'yesno', label:'Weekdays: 17:00 – 23:00'},
   {id:'weekend', type:'yesno', label:'Weekends (minimum 3 hours total)'},
   {id:'section_teaching', type:'section', label:'Teaching'},
-  {id:'hasKakaoAccount', type:'yesno', label:'Do you have a KakaoTalk account?'},
   {id:'kakaoIdImage', type:'image', imageKey:'kakaoId', label:'How to check your KakaoTalk ID', description:'Not sure what your KakaoTalk ID is? Follow the steps in the image below.'},
   {id:'kakaoId', type:'text', label:'KakaoTalk ID'},
   {id:'teachingExperience', type:'text', label:'Describe your teaching experience'},
@@ -3905,7 +3906,6 @@ function renderAdminApplications(){
       <td style="max-width:230px;">
         <span class="td-mobile-label">Matches</span>
         <div style="display:flex; flex-wrap:wrap; gap:5px;">
-          ${matchTag('KakaoTalk', a.hasKakaoAccount==='Yes')}
           ${matchTag('5–7 AM', a.availMorningPH==='Yes')}
           ${matchTag('Evening', a.weekdayEvening==='Yes')}
           ${(() => {
