@@ -3908,7 +3908,7 @@ function renderAdminApplications(){
       <td style="max-width:230px;">
         <span class="td-mobile-label">Matches</span>
         <div style="display:flex; flex-wrap:wrap; gap:5px;">
-          ${matchTag('5–7 AM', a.availMorningPH==='Yes')}
+          ${matchTag('Morning', a.availMorningPH==='Yes')}
           ${matchTag('Evening', a.weekdayEvening==='Yes')}
           ${(() => {
             const isHS = a.education === 'High school';
@@ -3949,7 +3949,7 @@ function renderAdminApplications(){
       <label style="margin:0; white-space:nowrap;">Availability</label>
       <select id="appFilterAvailability" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         <option value="all" ${applicationFilterAvailability==='all'?'selected':''}>All (${activeApplications.length})</option>
-        <option value="morning" ${applicationFilterAvailability==='morning'?'selected':''}>Morning 5–7 AM (${activeApplications.filter(a=>a.availMorningPH==='Yes').length})</option>
+        <option value="morning" ${applicationFilterAvailability==='morning'?'selected':''}>Morning (${activeApplications.filter(a=>a.availMorningPH==='Yes').length})</option>
         <option value="evening" ${applicationFilterAvailability==='evening'?'selected':''}>Evening (${activeApplications.filter(a=>a.weekdayEvening==='Yes').length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Education</label>
