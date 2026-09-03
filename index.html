@@ -3935,6 +3935,10 @@ function renderAdminApplications(){
     ${shareLinkBox}
     <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
     <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
+      <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
+    </div>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
       <label style="margin:0; white-space:nowrap;">Worked before</label>
       <select id="appFilterWorked" style="max-width:180px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -3965,8 +3969,6 @@ function renderAdminApplications(){
         <option value="newest" ${applicationSortOrder==='newest'?'selected':''}>Newest first</option>
         <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
       </select>
-      <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
-      <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
     </div>
     <table class="list-table app-list-table">
       <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Matches</th><th>Score</th><th>Result</th><th>Invited</th></tr></thead>
