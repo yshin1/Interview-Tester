@@ -1778,7 +1778,7 @@ function startApplicationsPolling(){
   appsListenerActive = true;
   appsUnsubscribe = adminDb.collection(APPLICATIONS_COLLECTION).onSnapshot(snap => {
     applications = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !deleteApplicationTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
+    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
   }, err => console.error('Applications listener error:', err));
@@ -3844,7 +3844,6 @@ function notionRowFields(b){
 }
 let applicationDetailTarget = null;
 let reapplicationHistoryTarget = null;
-let deleteApplicationTarget = null;
 let deleteTutorChatTarget = null;
 let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
@@ -3902,7 +3901,6 @@ function renderAdminApplications(){
           ? `<button class="btn btn-danger-outline btn-sm" style="width:auto;" data-reapp-history="${a.id}">🔄 Reapplicant</button>`
           : ''; })()}
       </td>
-      <td style="padding-left:22px;"><button class="btn btn-danger-outline btn-sm" data-delete-app="${a.id}">Delete</button></td>
     </tr>`;
   }).join('');
 
@@ -3938,13 +3936,13 @@ function renderAdminApplications(){
         <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
       </select>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
+      <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
     </div>
     <table class="list-table app-list-table">
-      <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Invited</th><th></th><th>Delete</th></tr></thead>
+      <thead><tr><th></th><th>Applicant</th><th>Submitted</th><th>Score</th><th>Result</th><th>Invited</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-  </div>
-  ${deleteApplicationTarget ? renderDeleteApplicationModal() : ''}`;
+  </div>`;
 }
 
 function renderApplicationDetailModal(){
@@ -4035,23 +4033,6 @@ function renderReapplicationHistoryModal(){
       ${rows}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="reappHistoryCloseBtn">Close</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderDeleteApplicationModal(){
-  const a = applications.find(x => x.id === deleteApplicationTarget) || {};
-  return `
-  <div class="modal-overlay" id="deleteAppOverlay">
-    <div class="modal">
-      <h3>Delete this application?</h3>
-      <p style="font-size:13.5px; color:var(--slate); line-height:1.6; margin:0 0 4px;">
-        This will permanently remove <strong>${escapeHtml(a.fullName)}</strong>'s application (${escapeHtml(a.email)}). This cannot be undone.
-      </p>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" id="deleteAppNoBtn">Keep it</button>
-        <button class="btn btn-danger-outline" id="deleteAppYesBtn" style="background:var(--danger); color:#fff; border-color:var(--danger);">Yes, delete it</button>
       </div>
     </div>
   </div>`;
@@ -6605,9 +6586,19 @@ Langdy Team`;
         el.onclick = () => { reapplicationHistoryTarget = el.dataset.reappHistory; render(); };
       });
 
-      $$('[data-delete-app]').forEach(el=>{
-        el.onclick = () => { deleteApplicationTarget = el.dataset.deleteApp; render(); };
-      });
+      const bulkDeleteBtn = $('#bulkDeleteBtn');
+      if(bulkDeleteBtn) bulkDeleteBtn.onclick = async () => {
+        const ids = [...selectedApplicationIds];
+        const selected = applications.filter(a => ids.includes(a.id));
+        if(selected.length === 0) return;
+        if(!confirm(`Delete ${selected.length} application${selected.length===1?'':'s'}? This can't be undone.`)) return;
+        bulkDeleteBtn.disabled = true; bulkDeleteBtn.textContent = 'Deleting…';
+        for(const a of selected){
+          await deleteOneApplication(a.id);
+        }
+        selectedApplicationIds = new Set();
+        render();
+      };
 
       const bulkBtn = $('#bulkInviteBtn');
       if(bulkBtn) bulkBtn.onclick = async () => {
@@ -6634,18 +6625,6 @@ Langdy Team`;
         selectedApplicationIds = new Set();
         render();
       };
-
-      if(deleteApplicationTarget){
-        $('#deleteAppNoBtn').onclick = () => { deleteApplicationTarget=null; render(); };
-        $('#deleteAppOverlay').onclick = (e) => { if(e.target.id==='deleteAppOverlay'){ deleteApplicationTarget=null; render(); } };
-        $('#deleteAppYesBtn').onclick = async () => {
-          const id = deleteApplicationTarget;
-          await deleteOneApplication(id);
-          selectedApplicationIds.delete(id);
-          deleteApplicationTarget = null;
-          render();
-        };
-      }
     }
 
     if(adminTab==='accountSignups'){
