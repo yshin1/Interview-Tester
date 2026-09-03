@@ -3908,7 +3908,11 @@ function renderAdminApplications(){
           ${matchTag('KakaoTalk', a.hasKakaoAccount==='Yes')}
           ${matchTag('5–7 AM', a.availMorningPH==='Yes')}
           ${matchTag('Evening', a.weekdayEvening==='Yes')}
-          ${matchTag('Education', !!a.education && a.education!=='High school')}
+          ${(() => {
+            const isHS = a.education === 'High school';
+            const label = a.education ? (isHS ? 'High school' : 'Degree') : 'Education';
+            return matchTag(label, !isHS && !!a.education);
+          })()}
         </div>
       </td>
       <td class="mobile-hide tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
