@@ -3850,6 +3850,7 @@ let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
+let applicationSortOrder = 'newest'; // 'newest' | 'oldest'
 
 function renderAdminApplications(){
   const shareLinkBox = renderShareLinkBox('apply', 'Application link');
@@ -3866,7 +3867,9 @@ function renderAdminApplications(){
   if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
   if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
   else if(applicationFilterResult==='pass') filtered = filtered.filter(a => a.result==='pass');
-  const sorted = [...filtered].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  const sorted = [...filtered].sort((a,b) => applicationSortOrder === 'newest'
+    ? new Date(b.submittedAt) - new Date(a.submittedAt)
+    : new Date(a.submittedAt) - new Date(b.submittedAt));
 
   const rows = sorted.length===0 ? `<tr><td colspan="8" style="padding:24px; text-align:center; color:var(--slate-light);">No applications match this filter.</td></tr>` : sorted.map(a => {
     const hasBooked = bookings.some(b => (b.email||'').trim().toLowerCase() === (a.email||'').trim().toLowerCase());
@@ -3928,6 +3931,11 @@ function renderAdminApplications(){
         <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${activeApplications.length})</option>
         <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
         <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Sort</label>
+      <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="newest" ${applicationSortOrder==='newest'?'selected':''}>Newest first</option>
+        <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
       </select>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="margin-left:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
     </div>
@@ -6568,6 +6576,8 @@ Langdy Team`;
       if(filterInvitedSel) filterInvitedSel.onchange = e => { applicationFilterInvited = e.target.value; render(); };
       const filterResultSel = $('#appFilterResult');
       if(filterResultSel) filterResultSel.onchange = e => { applicationFilterResult = e.target.value; render(); };
+      const sortOrderSel = $('#appSortOrder');
+      if(sortOrderSel) sortOrderSel.onchange = e => { applicationSortOrder = e.target.value; render(); };
 
       $$('[data-select-app]').forEach(el=>{
         el.onchange = () => {
