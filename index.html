@@ -4067,6 +4067,7 @@ async function translateSelfIntroToKorean(signupId, text){
 let deleteAccountSignupTarget = null;
 
 let signupFilterIncomplete = false; // when true, only show tutors whose account isn't created yet
+let deviceFilterNeedsBackup = false; // when true, only show submissions with no backup power/internet
 
 function renderAdminAccountSignups(){
   const shareLinkBox = renderShareLinkBox('signup', 'Account Signup link');
@@ -4203,10 +4204,24 @@ function renderAdminDeviceSubmissions(){
   if(deviceSubmissions.length === 0){
     return `<div class="card">${shareLinkBox}<div class="empty-state">No device submissions yet.</div></div>`;
   }
-  const sorted = [...deviceSubmissions].sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-  const rows = sorted.map(s => `
+  // Pulled straight from the tutor's own answers on the Device form
+  // (hasPowerStation, backupInternetType) — no separate admin dropdown to
+  // keep in sync, and no need to cross-reference the Onboarding tab.
+  const needsBackupContact = s => (s.hasPowerStation === 'No') || (s.backupInternetType === 'None of the above');
+  let filtered = [...deviceSubmissions];
+  if(deviceFilterNeedsBackup) filtered = filtered.filter(needsBackupContact);
+  const sorted = filtered.sort((a,b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  const needsBackupCount = deviceSubmissions.filter(needsBackupContact).length;
+  const rows = sorted.length === 0 ? `<tr><td colspan="4" style="padding:24px; text-align:center; color:var(--slate-light);">No one matches this filter.</td></tr>` : sorted.map(s => {
+    const noPower = s.hasPowerStation === 'No';
+    const noInternet = s.backupInternetType === 'None of the above';
+    const backupTags = [
+      noPower ? '<span style="font-size:10.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:4px; padding:2px 6px; margin-right:4px; white-space:nowrap;">⚠️ No power backup</span>' : '',
+      noInternet ? '<span style="font-size:10.5px; font-weight:700; color:#fff; background:var(--danger); border-radius:4px; padding:2px 6px; white-space:nowrap;">⚠️ No internet backup</span>' : ''
+    ].filter(Boolean).join('');
+    return `
     <tr>
-      <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}</td>
+      <td><strong>${escapeHtml(s.tutorName)}</strong>${renderNewBadge(s)}${backupTags ? `<div style="margin-top:4px;">${backupTags}</div>` : ''}</td>
       <td class="mobile-hide tag">${new Date(s.submittedAt).toLocaleString('en-US')}</td>
       <td>${s.reviewed ? '<span class="unread-badge" style="background:var(--success);">Reviewed</span>' : '<span style="color:var(--slate-light); font-size:12px;">New</span>'}</td>
       <td>
@@ -4215,11 +4230,18 @@ function renderAdminDeviceSubmissions(){
           <button class="btn btn-danger-outline btn-sm" data-delete-device="${s.id}">Delete</button>
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   return `
   <div class="card">
     ${shareLinkBox}
-    <button class="btn btn-ghost btn-sm" id="exportDeviceExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" id="exportDeviceExcelBtn" style="width:auto; padding:9px 16px;">📊 Export to Excel</button>
+      <label class="checkbox-item" style="cursor:pointer;">
+        <input type="checkbox" id="deviceFilterNeedsBackupToggle" ${deviceFilterNeedsBackup?'checked':''}>
+        No backup power/internet only (${needsBackupCount})
+      </label>
+    </div>
     <table class="list-table archive-list-table">
       <thead><tr><th>Tutor</th><th>Submitted</th><th>Status</th><th>Manage</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -4265,6 +4287,11 @@ function renderDeviceSubmissionDetailModal(){
   <div class="modal-overlay" id="deviceDetailOverlay">
     <div class="modal" style="max-width:520px; max-height:82vh; overflow:auto;">
       <h3>${escapeHtml(s.tutorName)}</h3>
+      ${(s.hasPowerStation === 'No' || s.backupInternetType === 'None of the above') ? `
+      <div class="warn-box strong" style="margin-bottom:14px;">
+        <div class="icon">⚠️</div>
+        <div class="txt">${[s.hasPowerStation==='No'?'No backup power source':null, s.backupInternetType==='None of the above'?'No backup internet':null].filter(Boolean).join(' · ')} — may need to follow up.</div>
+      </div>` : ''}
       ${fieldsHtml}
       <div class="modal-actions">
         <button class="btn btn-ghost" id="deviceDetailCloseBtn">Close</button>
@@ -6655,6 +6682,8 @@ Langdy Team`;
       if(exportBtn) exportBtn.onclick = () => {
         exportSubmissionsToExcel(deviceSubmissions, formSchemas.device || DEVICE_FORM_DEFAULT_SCHEMA, 'Langdy_DeviceSubmissions');
       };
+      const backupFilterToggle = $('#deviceFilterNeedsBackupToggle');
+      if(backupFilterToggle) backupFilterToggle.onchange = e => { deviceFilterNeedsBackup = e.target.checked; render(); };
       $$('[data-view-device]').forEach(el=>{
         el.onclick = () => { deviceSubmissionDetailTarget = el.dataset.viewDevice; markDeviceSubmissionViewed(deviceSubmissionDetailTarget); render(); };
       });
