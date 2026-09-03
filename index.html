@@ -803,7 +803,6 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'certification', type:'text', label:'Certification'},
   {id:'verificationImage', type:'file', label:'Verification Image (ID or certificate photo)'},
   {id:'section_availability', type:'section', label:'Availability (Philippine time)'},
-  {id:'weekdayMorning', type:'yesno', label:'Weekdays: 5:30 – 8:30 AM'},
   {id:'availMorningPH', type:'yesno', label:'Weekdays: 5:00 – 7:00 AM'},
   {id:'weekdayEvening', type:'yesno', label:'Weekdays: 17:00 – 23:00'},
   {id:'weekend', type:'yesno', label:'Weekends (minimum 3 hours total)'},
@@ -939,7 +938,7 @@ function freshApplyForm(){
     fullName:'', reference:'', platform:'', workedBefore:'', interviewedBefore:'', email:'',
     education:'', certification:'',
     verificationImageFile:null, verificationImageName:'',
-    weekdayMorning:'', weekdayEvening:'', weekend:'',
+    weekdayEvening:'', weekend:'',
     kakaoId:'', teachingExperience:'',
     recordingFile:null, recordingName:'',
     internetType:'', backupInternet:'',
@@ -3862,6 +3861,7 @@ let selectedApplicationIds = new Set();
 let applicationFilterWorked = 'all'; // 'all' | 'Yes' | 'No'
 let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
+let applicationFilterEducation = 'all'; // 'all' | 'highschool' | 'college'
 let applicationSortOrder = 'newest'; // 'newest' | 'oldest'
 
 function renderAdminApplications(){
@@ -3879,6 +3879,8 @@ function renderAdminApplications(){
   if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
   if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
   else if(applicationFilterResult==='pass') filtered = filtered.filter(a => a.result==='pass');
+  if(applicationFilterEducation==='highschool') filtered = filtered.filter(a => a.education==='High school');
+  else if(applicationFilterEducation==='college') filtered = filtered.filter(a => a.education && a.education!=='High school');
   const sorted = [...filtered].sort((a,b) => applicationSortOrder === 'newest'
     ? new Date(b.submittedAt) - new Date(a.submittedAt)
     : new Date(a.submittedAt) - new Date(b.submittedAt));
@@ -3906,6 +3908,7 @@ function renderAdminApplications(){
           ${matchTag('KakaoTalk', a.hasKakaoAccount==='Yes')}
           ${matchTag('5–7 AM', a.availMorningPH==='Yes')}
           ${matchTag('Evening', a.weekdayEvening==='Yes')}
+          ${matchTag('Education', !!a.education && a.education!=='High school')}
         </div>
       </td>
       <td class="mobile-hide tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
@@ -3946,6 +3949,12 @@ function renderAdminApplications(){
         <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${activeApplications.length})</option>
         <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
         <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Education</label>
+      <select id="appFilterEducation" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterEducation==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="college" ${applicationFilterEducation==='college'?'selected':''}>College+ (${activeApplications.filter(a=>a.education && a.education!=='High school').length})</option>
+        <option value="highschool" ${applicationFilterEducation==='highschool'?'selected':''}>High school (${activeApplications.filter(a=>a.education==='High school').length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Sort</label>
       <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -6585,6 +6594,8 @@ Langdy Team`;
       if(filterInvitedSel) filterInvitedSel.onchange = e => { applicationFilterInvited = e.target.value; render(); };
       const filterResultSel = $('#appFilterResult');
       if(filterResultSel) filterResultSel.onchange = e => { applicationFilterResult = e.target.value; render(); };
+      const filterEducationSel = $('#appFilterEducation');
+      if(filterEducationSel) filterEducationSel.onchange = e => { applicationFilterEducation = e.target.value; render(); };
       const sortOrderSel = $('#appSortOrder');
       if(sortOrderSel) sortOrderSel.onchange = e => { applicationSortOrder = e.target.value; render(); };
 
