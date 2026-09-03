@@ -3934,12 +3934,19 @@ function renderAdminApplications(){
   return `
   <div class="card">
     ${shareLinkBox}
-    <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px; margin-bottom:14px;">📊 Export to Excel</button>
-    <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px;">📊 Export to Excel</button>
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
       <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
-      <label style="margin:0 0 0 8px; white-space:nowrap;">Availability</label>
+    </div>
+    <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:nowrap;">
+      <label style="margin:0; white-space:nowrap;">Sort</label>
+      <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="newest" ${applicationSortOrder==='newest'?'selected':''}>Newest first</option>
+        <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Availability</label>
       <select id="appFilterAvailability" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         <option value="all" ${applicationFilterAvailability==='all'?'selected':''}>All (${activeApplications.length})</option>
         <option value="morning" ${applicationFilterAvailability==='morning'?'selected':''}>Morning 5–7 AM (${activeApplications.filter(a=>a.availMorningPH==='Yes').length})</option>
@@ -3962,11 +3969,6 @@ function renderAdminApplications(){
         <option value="all" ${applicationFilterEducation==='all'?'selected':''}>All (${activeApplications.length})</option>
         <option value="college" ${applicationFilterEducation==='college'?'selected':''}>College+ (${activeApplications.filter(a=>a.education && a.education!=='High school').length})</option>
         <option value="highschool" ${applicationFilterEducation==='highschool'?'selected':''}>High school (${activeApplications.filter(a=>a.education==='High school').length})</option>
-      </select>
-      <label style="margin:0; white-space:nowrap;">Sort</label>
-      <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-        <option value="newest" ${applicationSortOrder==='newest'?'selected':''}>Newest first</option>
-        <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
       </select>
     </div>
     <table class="list-table app-list-table">
