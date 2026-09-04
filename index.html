@@ -1025,7 +1025,14 @@ let capacitySaving = false;
 let capacitySaved = false;
 let cancelTarget = null; // booking pending cancel confirmation
 let notesTarget = null;  // booking whose notes modal is open
-let listDateFilter = 'all';
+let listDateFrom = '';
+let listDateTo = '';
+let listSortOrder = 'oldest'; // 'oldest' | 'newest' — oldest-first means soonest-demo-date-first (chronological schedule order)
+let listAssigneeFilter = 'all';
+let secondDemoDateFrom = '';
+let secondDemoDateTo = '';
+let secondDemoSortOrder = 'oldest'; // 'oldest' | 'newest'
+let secondDemoAssigneeFilter = 'all';
 
 /* ============================================================
    Storage adapter — backed by Firebase Firestore
@@ -4484,28 +4491,37 @@ function renderDeleteDeviceSubmissionModal(){
 
 function renderAdminList(){
   const activeBookings = bookings.filter(b => b.demoResult !== 'pass'); // passed applicants move to the 2nd Demo tab only
-  const allDates = Array.from(new Set(activeBookings.map(b=>b.date))).sort();
-  const filtered = listDateFilter==='all' ? activeBookings : activeBookings.filter(b=>b.date===listDateFilter);
+  let filtered = activeBookings;
+  if(listDateFrom) filtered = filtered.filter(b => b.date >= listDateFrom);
+  if(listDateTo) filtered = filtered.filter(b => b.date <= listDateTo);
+  if(listAssigneeFilter==='unassigned') filtered = filtered.filter(b => !b.assignedTo);
+  else if(listAssigneeFilter!=='all') filtered = filtered.filter(b => b.assignedTo===listAssigneeFilter);
   const rows = [...filtered].sort((a,b)=>{
     const key = x => x.date + ' ' + x.time;
-    return key(a).localeCompare(key(b));
+    return listSortOrder==='newest' ? key(b).localeCompare(key(a)) : key(a).localeCompare(key(b));
   });
-  const filterOptions = `<option value="all" ${listDateFilter==='all'?'selected':''}>All dates (${activeBookings.length})</option>` +
-    allDates.map(ds => {
-      const count = activeBookings.filter(b=>b.date===ds).length;
-      return `<option value="${ds}" ${listDateFilter===ds?'selected':''}>${fmtDateLabel(ds)} (${count})</option>`;
-    }).join('');
   const filterBar = `
   <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-    <label style="margin:0; white-space:nowrap;">Filter by date</label>
-    <select id="listDateFilterSelect" style="max-width:260px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
-      ${filterOptions}
+    <label style="margin:0; white-space:nowrap;">From</label>
+    <input type="date" id="listDateFromInput" value="${listDateFrom}" style="padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    <label style="margin:0; white-space:nowrap;">To</label>
+    <input type="date" id="listDateToInput" value="${listDateTo}" style="padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    <label style="margin:0; white-space:nowrap;">Sort</label>
+    <select id="listSortOrderSelect" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <option value="oldest" ${listSortOrder==='oldest'?'selected':''}>Soonest first</option>
+      <option value="newest" ${listSortOrder==='newest'?'selected':''}>Latest first</option>
+    </select>
+    <label style="margin:0; white-space:nowrap;">Assigned to</label>
+    <select id="listAssigneeFilterSelect" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <option value="all" ${listAssigneeFilter==='all'?'selected':''}>All (${activeBookings.length})</option>
+      <option value="unassigned" ${listAssigneeFilter==='unassigned'?'selected':''}>Unassigned (${activeBookings.filter(b=>!b.assignedTo).length})</option>
+      ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${listAssigneeFilter===n?'selected':''}>${n} (${activeBookings.filter(b=>b.assignedTo===n).length})</option>`).join('')}
     </select>
     <button class="btn btn-primary btn-sm" id="copyNotionBtn" style="margin-left:auto;" ${rows.length===0?'disabled':''}>📋 Copy for Notion</button>
   </div>
-  <p class="hint" style="margin:-8px 0 16px;">Opens a box with the rows below (respecting the date filter) already selected — press <strong>Ctrl+C</strong> (Cmd+C on Mac), close the box, then in Notion click <strong>+ New</strong> for a blank row, hover its left edge and click the checkbox to <strong>select the whole row</strong> (not the Contact Date cell, which opens a date picker), then paste (Ctrl+V / Cmd+V).</p>`;
+  <p class="hint" style="margin:-8px 0 16px;">Opens a box with the rows below (respecting the filters above) already selected — press <strong>Ctrl+C</strong> (Cmd+C on Mac), close the box, then in Notion click <strong>+ New</strong> for a blank row, hover its left edge and click the checkbox to <strong>select the whole row</strong> (not the Contact Date cell, which opens a date picker), then paste (Ctrl+V / Cmd+V).</p>`;
   if(rows.length===0){
-    return `<div class="card">${filterBar}<div class="empty-state">No bookings ${listDateFilter==='all'?'yet':'for this date'}.</div></div>`;
+    return `<div class="card">${filterBar}<div class="empty-state">No bookings match this filter.</div></div>`;
   }
   const trs = rows.map(b => {
     const unread = unreadCountForAdmin(b);
@@ -5248,11 +5264,37 @@ function renderAdminSecondDemo(){
   if(passed.length === 0){
     return `<div class="card"><div class="empty-state">No one has passed the 1st Demo yet. Mark someone as "Pass" in the List tab's 1st Demo Result column and they'll show up here.</div></div>`;
   }
-  const sorted = [...passed].sort((a,b) => {
+  let filtered = passed;
+  if(secondDemoDateFrom) filtered = filtered.filter(b => b.secondDemoDate && b.secondDemoDate >= secondDemoDateFrom);
+  if(secondDemoDateTo) filtered = filtered.filter(b => b.secondDemoDate && b.secondDemoDate <= secondDemoDateTo);
+  if(secondDemoAssigneeFilter==='unassigned') filtered = filtered.filter(b => !b.secondDemoAssignedTo);
+  else if(secondDemoAssigneeFilter!=='all') filtered = filtered.filter(b => b.secondDemoAssignedTo===secondDemoAssigneeFilter);
+  const sorted = [...filtered].sort((a,b) => {
     const ka = a.secondDemoDate ? a.secondDemoDate+' '+(a.secondDemoTime||'') : '9999';
     const kb = b.secondDemoDate ? b.secondDemoDate+' '+(b.secondDemoTime||'') : '9999';
-    return ka.localeCompare(kb);
+    return secondDemoSortOrder==='newest' ? kb.localeCompare(ka) : ka.localeCompare(kb);
   });
+  const filterBar = `
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+    <label style="margin:0; white-space:nowrap;">From</label>
+    <input type="date" id="secondDemoDateFromInput" value="${secondDemoDateFrom}" style="padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    <label style="margin:0; white-space:nowrap;">To</label>
+    <input type="date" id="secondDemoDateToInput" value="${secondDemoDateTo}" style="padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+    <label style="margin:0; white-space:nowrap;">Sort</label>
+    <select id="secondDemoSortOrderSelect" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <option value="oldest" ${secondDemoSortOrder==='oldest'?'selected':''}>Soonest first</option>
+      <option value="newest" ${secondDemoSortOrder==='newest'?'selected':''}>Latest first</option>
+    </select>
+    <label style="margin:0; white-space:nowrap;">Assigned to</label>
+    <select id="secondDemoAssigneeFilterSelect" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+      <option value="all" ${secondDemoAssigneeFilter==='all'?'selected':''}>All (${passed.length})</option>
+      <option value="unassigned" ${secondDemoAssigneeFilter==='unassigned'?'selected':''}>Unassigned (${passed.filter(b=>!b.secondDemoAssignedTo).length})</option>
+      ${ASSIGNEE_OPTIONS.map(n=>`<option value="${n}" ${secondDemoAssigneeFilter===n?'selected':''}>${n} (${passed.filter(b=>b.secondDemoAssignedTo===n).length})</option>`).join('')}
+    </select>
+  </div>`;
+  if(sorted.length === 0){
+    return `<div class="card">${filterBar}<div class="empty-state">No one matches this filter.</div></div>`;
+  }
   const rows = sorted.map(b => `
     <tr>
       <td><strong>${escapeHtml(b.fullName)}</strong>${b.secondDemoResult ? '' : renderNewBadge(b)}<br><span style="color:var(--slate-light); font-size:11.5px;">${escapeHtml(b.email)}</span></td>
@@ -5276,6 +5318,7 @@ function renderAdminSecondDemo(){
     </tr>`).join('');
   return `
   <div class="card">
+    ${filterBar}
     <p class="hint" style="margin:0 0 16px;">Only applicants marked <strong>Pass</strong> on their 1st Demo Result show up here. If a "Pass" was entered by mistake, change it back using the <strong>1st Demo Result</strong> column — they'll disappear from here immediately and return to the 1st Demo tab. The 2nd Demo date/time below is set manually (scheduled verbally, not through the booking system) and is completely separate from the 1st Demo slots — no capacity limits apply. Times are in <strong>Korea Standard Time (KST)</strong>, not PHT.</p>
     <table class="list-table demo-list-table">
       <thead><tr><th>Applicant</th><th>1st Demo Result</th><th>2nd Demo Assigned</th><th>2nd Demo Date (KST)</th><th>2nd Demo Time (KST)</th><th>2nd Demo Result</th><th>Manage</th></tr></thead>
@@ -6919,14 +6962,24 @@ Langdy Team`;
     }
 
     if(adminTab==='list'){
-      const filterSel = $('#listDateFilterSelect');
-      if(filterSel) filterSel.onchange = e => { listDateFilter = e.target.value; render(); };
+      const fromInput = $('#listDateFromInput');
+      if(fromInput) fromInput.onchange = e => { listDateFrom = e.target.value; render(); };
+      const toInput = $('#listDateToInput');
+      if(toInput) toInput.onchange = e => { listDateTo = e.target.value; render(); };
+      const sortSel = $('#listSortOrderSelect');
+      if(sortSel) sortSel.onchange = e => { listSortOrder = e.target.value; render(); };
+      const assigneeSel = $('#listAssigneeFilterSelect');
+      if(assigneeSel) assigneeSel.onchange = e => { listAssigneeFilter = e.target.value; render(); };
       const copyBtn = $('#copyNotionBtn');
       if(copyBtn) copyBtn.onclick = () => {
-        const filtered = listDateFilter==='all' ? bookings : bookings.filter(b=>b.date===listDateFilter);
+        let filtered = bookings.filter(b => b.demoResult !== 'pass');
+        if(listDateFrom) filtered = filtered.filter(b => b.date >= listDateFrom);
+        if(listDateTo) filtered = filtered.filter(b => b.date <= listDateTo);
+        if(listAssigneeFilter==='unassigned') filtered = filtered.filter(b => !b.assignedTo);
+        else if(listAssigneeFilter!=='all') filtered = filtered.filter(b => b.assignedTo===listAssigneeFilter);
         const sorted = [...filtered].sort((a,b)=>{
           const key = x => x.date + ' ' + x.time;
-          return key(a).localeCompare(key(b));
+          return listSortOrder==='newest' ? key(b).localeCompare(key(a)) : key(a).localeCompare(key(b));
         });
         showNotionSelectOverlay(sorted);
       };
@@ -7252,6 +7305,14 @@ Langdy Team`;
     }
 
     if(adminTab==='secondDemo'){
+      const fromInput2 = $('#secondDemoDateFromInput');
+      if(fromInput2) fromInput2.onchange = e => { secondDemoDateFrom = e.target.value; render(); };
+      const toInput2 = $('#secondDemoDateToInput');
+      if(toInput2) toInput2.onchange = e => { secondDemoDateTo = e.target.value; render(); };
+      const sortSel2 = $('#secondDemoSortOrderSelect');
+      if(sortSel2) sortSel2.onchange = e => { secondDemoSortOrder = e.target.value; render(); };
+      const assigneeSel2 = $('#secondDemoAssigneeFilterSelect');
+      if(assigneeSel2) assigneeSel2.onchange = e => { secondDemoAssigneeFilter = e.target.value; render(); };
       $$('[data-chat-id]').forEach(el=>{
         el.onclick = async () => {
           const id = el.dataset.chatId;
