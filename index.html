@@ -1789,7 +1789,7 @@ function startApplicationsPolling(){
   appsListenerActive = true;
   appsUnsubscribe = adminDb.collection(APPLICATIONS_COLLECTION).onSnapshot(snap => {
     applications = snap.docs.map(doc => Object.assign({ id: doc.id }, doc.data()));
-    if(view==='admin' && adminTab==='applications' && !applicationDetailTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
+    if(view==='admin' && (adminTab==='applications' || adminTab==='applicantOverview') && !applicationDetailTarget && !reapplicationHistoryTarget && !isFormControlFocused()){
       render();
     }
   }, err => console.error('Applications listener error:', err));
@@ -3485,6 +3485,7 @@ function renderChatPanel(bookingId, viewerRole){
 const TAB_GROUPS = [
   { label: 'Calendar', tab: 'calendar' },
   { label: 'Applications', children: [
+      ['applicantOverview','Applicant'],
       ['applications','Screening'],
       ['list','1st Demo'],
       ['secondDemo','2nd Demo'],
@@ -3638,7 +3639,8 @@ function renderAdmin(){
     </div>`;
 
   let body = '';
-  if(adminTab==='applications') body = renderAdminApplications();
+  if(adminTab==='applicantOverview') body = renderAdminApplicantOverview();
+  else if(adminTab==='applications') body = renderAdminApplications();
   else if(adminTab==='calendar') body = renderAdminCalendar();
   else if(adminTab==='list') body = renderAdminList();
   else if(adminTab==='secondDemo') body = renderAdminSecondDemo();
@@ -3868,6 +3870,121 @@ let applicationFilterInvited = 'all'; // 'all' | 'invited' | 'notInvited'
 let applicationFilterResult = 'all'; // 'all' | 'pass' | 'fail' | 'pending'
 let applicationFilterEducation = 'all'; // 'all' | 'highschool' | 'college'
 let applicationSortOrder = 'newest'; // 'newest' | 'oldest'
+
+function renderAdminApplicantOverview(){
+  const shareLinkBox = renderShareLinkBox('apply', 'Application link');
+  const activeApplications = applications.filter(a => !hasMovedOnFromApplication(a));
+  if(activeApplications.length === 0){
+    return `<div class="card">${shareLinkBox}<div class="empty-state">No applicants yet.</div></div>`;
+  }
+  let filtered = activeApplications;
+  if(applicationFilterAvailability==='morning') filtered = filtered.filter(a => a.availMorningPH==='Yes');
+  else if(applicationFilterAvailability==='evening') filtered = filtered.filter(a => a.weekdayEvening==='Yes');
+  if(applicationFilterInvited==='invited') filtered = filtered.filter(a => !!a.invited);
+  if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
+  if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
+  else if(applicationFilterResult==='pass') filtered = filtered.filter(a => a.result==='pass');
+  else if(applicationFilterResult==='fail') filtered = filtered.filter(a => a.result==='fail');
+  if(applicationFilterEducation==='highschool') filtered = filtered.filter(a => a.education==='High school');
+  else if(applicationFilterEducation==='college') filtered = filtered.filter(a => a.education && a.education!=='High school');
+  const sorted = [...filtered].sort((a,b) => applicationSortOrder === 'newest'
+    ? new Date(b.submittedAt) - new Date(a.submittedAt)
+    : new Date(a.submittedAt) - new Date(b.submittedAt));
+
+  const stageColors = { 'Screening': 'var(--slate)', '1st Demo': 'var(--gold-dark)', '2nd Demo': '#B36B1E', 'Onboarding': 'var(--success)' };
+
+  const rows = sorted.length===0 ? `<tr><td colspan="9" style="padding:24px; text-align:center; color:var(--slate-light);">No applicants match this filter.</td></tr>` : sorted.map(a => {
+    const hasBooked = bookings.some(b => (b.email||'').trim().toLowerCase() === (a.email||'').trim().toLowerCase());
+    const daysSinceInvite = a.invitedAt ? (Date.now() - new Date(a.invitedAt).getTime()) / 86400000 : null;
+    const isExpired = a.invited && !hasBooked && daysSinceInvite != null && daysSinceInvite > 30;
+    const invitedDateStr = a.invitedAt ? new Date(a.invitedAt).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : null;
+    const invitedCell = isExpired
+      ? `<span style="font-size:11px; color:var(--danger); font-weight:700;">⏰ Expired</span>${invitedDateStr ? `<br><span style="font-size:10px; color:var(--slate-light);">${invitedDateStr}</span>` : ''}`
+      : a.invited
+        ? `<span style="font-size:11px; color:var(--success); font-weight:700;">✓ Invited</span>${invitedDateStr ? `<br><span style="font-size:10px; color:var(--slate-light);">${invitedDateStr}</span>` : ''}`
+        : `<span style="font-size:11px; color:var(--slate-light);">Not invited</span>`;
+    const submittedDate = new Date(a.submittedAt);
+    const isReapplicant = hasFormerTutorHistory(a.email, a.id);
+    const stage = getApplicantStage(a.email);
+    return `
+    <tr>
+      <td><input type="checkbox" data-select-app="${a.id}" ${selectedApplicationIds.has(a.id)?'checked':''} style="width:16px; height:16px; accent-color:var(--navy);"></td>
+      <td><strong data-view-app="${a.id}" style="cursor:pointer; text-decoration:underline; text-decoration-color:transparent; transition:text-decoration-color .12s;" onmouseover="this.style.textDecorationColor='var(--navy)'" onmouseout="this.style.textDecorationColor='transparent'">${escapeHtml(a.fullName)}</strong>${renderNewBadge(a)}${isReapplicant ? `<br><span class="unread-badge" style="background:var(--danger); cursor:pointer;" data-reapp-history="${a.id}">🔄 Former Tutor</span>` : ''}</td>
+      <td><span class="td-mobile-label">Stage</span><span class="unread-badge" style="background:${stageColors[stage]};">${stage}</span></td>
+      <td class="mobile-hide tag" style="white-space:nowrap;">${submittedDate.toLocaleDateString('en-US')}<br><span style="font-size:10.5px; color:var(--slate-light);">${submittedDate.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span></td>
+      <td style="max-width:230px;">
+        <span class="td-mobile-label">Matches</span>
+        <div style="display:flex; flex-wrap:wrap; gap:5px;">
+          ${matchTag('Morning', a.availMorningPH==='Yes')}
+          ${matchTag('Evening', a.weekdayEvening==='Yes')}
+          ${(() => {
+            const isHS = a.education === 'High school';
+            return matchTag(a.education || 'Education', !isHS && !!a.education);
+          })()}
+        </div>
+      </td>
+      <td class="mobile-hide tag">${a.score!=null && a.score!=='' ? a.score+'/10' : '—'}</td>
+      <td>
+        <span class="td-mobile-label">Result</span>
+        <select data-result-app="${a.id}" style="font-size:12.5px; padding:6px 8px; border:1.5px solid var(--line); border-radius:7px; font-family:inherit;">
+          <option value="" ${!a.result?'selected':''}>Pending</option>
+          <option value="pass" ${a.result==='pass'?'selected':''}>Pass</option>
+          <option value="fail" ${a.result==='fail'?'selected':''}>Fail</option>
+        </select>
+      </td>
+      <td>${invitedCell}</td>
+    </tr>`;
+  }).join('');
+
+  const selectedCount = [...selectedApplicationIds].filter(id => sorted.some(a=>a.id===id)).length;
+
+  return `
+  <div class="card">
+    ${shareLinkBox}
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+      <button class="btn btn-ghost btn-sm" id="exportApplicationsExcelBtn" style="width:auto; padding:9px 16px;">📊 Export to Excel</button>
+      <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
+      <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
+    </div>
+    <div class="section-desc" style="margin-bottom:12px;">Everyone across the whole pipeline, with their current stage — Screening, 1st Demo, 2nd Demo, or Onboarding.</div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:nowrap;">
+      <label style="margin:0; white-space:nowrap;">Sort</label>
+      <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="newest" ${applicationSortOrder==='newest'?'selected':''}>Newest first</option>
+        <option value="oldest" ${applicationSortOrder==='oldest'?'selected':''}>Oldest first</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Availability</label>
+      <select id="appFilterAvailability" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterAvailability==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="morning" ${applicationFilterAvailability==='morning'?'selected':''}>Morning (${activeApplications.filter(a=>a.availMorningPH==='Yes').length})</option>
+        <option value="evening" ${applicationFilterAvailability==='evening'?'selected':''}>Evening (${activeApplications.filter(a=>a.weekdayEvening==='Yes').length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Education</label>
+      <select id="appFilterEducation" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterEducation==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="college" ${applicationFilterEducation==='college'?'selected':''}>College+ (${activeApplications.filter(a=>a.education && a.education!=='High school').length})</option>
+        <option value="highschool" ${applicationFilterEducation==='highschool'?'selected':''}>High school (${activeApplications.filter(a=>a.education==='High school').length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Result</label>
+      <select id="appFilterResult" style="max-width:160px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
+        <option value="fail" ${applicationFilterResult==='fail'?'selected':''}>Fail (${activeApplications.filter(a=>a.result==='fail').length})</option>
+        <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
+      </select>
+      <label style="margin:0; white-space:nowrap;">Invited</label>
+      <select id="appFilterInvited" style="max-width:170px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
+        <option value="all" ${applicationFilterInvited==='all'?'selected':''}>All (${activeApplications.length})</option>
+        <option value="invited" ${applicationFilterInvited==='invited'?'selected':''}>Invited (${activeApplications.filter(a=>a.invited).length})</option>
+        <option value="notInvited" ${applicationFilterInvited==='notInvited'?'selected':''}>Not invited (${activeApplications.filter(a=>!a.invited).length})</option>
+      </select>
+    </div>
+    <table class="list-table app-list-table">
+      <thead><tr><th></th><th>Applicant</th><th>Stage</th><th>Submitted</th><th>Matches</th><th>Score</th><th>Result</th><th>Invited</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
 
 function renderAdminApplications(){
   const shareLinkBox = renderShareLinkBox('apply', 'Application link');
@@ -4780,6 +4897,19 @@ function hasMovedOnFromApplication(a){
 // just for deciding whether to show the "Reapplicant" flag in the
 // Applications row: only a past tutor (resigned/terminated) re-applying
 // counts, not someone who merely failed a demo before.
+// Matches the exact criteria each stage tab already uses to decide who
+// shows up there (1st Demo: has a booking, not yet passed; 2nd Demo:
+// passed 1st, not yet passed 2nd; Onboarding: passed 2nd) — kept in sync
+// by hand since this is just for display on the Applicant overview tab,
+// not a real routing decision.
+function getApplicantStage(email){
+  const emailNorm = (email||'').trim().toLowerCase();
+  const booking = bookings.find(b => (b.email||'').trim().toLowerCase() === emailNorm);
+  if(!booking) return 'Screening';
+  if(booking.secondDemoResult === 'pass') return 'Onboarding';
+  if(booking.demoResult === 'pass') return '2nd Demo';
+  return '1st Demo';
+}
 function hasFormerTutorHistory(email, excludeAppId){
   const emailNorm = (email||'').trim().toLowerCase();
   if(!emailNorm) return false;
@@ -6540,7 +6670,7 @@ function attachHandlers(){
       };
     });
 
-    if(adminTab==='applications'){
+    if(adminTab==='applications' || adminTab==='applicantOverview'){
       startApplicationsPolling();
     } else {
       stopApplicationsPolling();
@@ -6571,7 +6701,7 @@ function attachHandlers(){
       stopBookingsPolling();
     }
 
-    if(adminTab==='applications'){
+    if(adminTab==='applications' || adminTab==='applicantOverview'){
       if(applicantCodeAdmin === null && !applicantCodeLoadError) loadApplicantCodeForAdmin().then(render);
       const exportBtn = $('#exportApplicationsExcelBtn');
       if(exportBtn) exportBtn.onclick = () => {
