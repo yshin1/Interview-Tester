@@ -100,7 +100,7 @@
     flex:1; display:flex; align-items:center; justify-content:center; padding:24px;
   }
   .main-wrap{ flex:1; max-width:880px; width:100%; margin:0 auto; padding:28px 20px 60px; }
-  .admin-wrap{ flex:1; max-width:1440px; width:100%; margin:0 auto; padding:28px 24px 60px; }
+  .admin-wrap{ flex:1; max-width:1440px; width:100%; margin:0 auto; }
 
   /* ---------- card ---------- */
   .card{
@@ -266,12 +266,12 @@
   .admin-sidebar-item.active{ background:var(--navy); color:#fff; }
   .admin-sidebar-item:hover{ background:#F5F6F8; }
   .admin-sidebar-item.active:hover{ background:var(--navy); }
-  .admin-shell{ display:flex; align-items:flex-start; gap:26px; }
+  .admin-shell{ display:flex; align-items:flex-start; }
   .admin-sidebar-desktop{
-    flex-shrink:0; width:220px; background:#fff; border:1px solid var(--line); border-radius:14px;
-    padding:14px 10px; position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto;
+    flex-shrink:0; width:220px; background:#fff; border-right:1px solid var(--line);
+    padding:18px 10px; position:sticky; top:0; align-self:stretch; overflow-y:auto;
   }
-  .admin-main{ flex:1; min-width:0; }
+  .admin-main{ flex:1; min-width:0; padding:28px 24px 60px 24px; }
 
   /* ---------- calendar ---------- */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -397,7 +397,7 @@
     .cal-grid-desktop{ display:none; }
     .cal-mobile-list{ display:block; }
     table.list-table{ font-size:12px; }
-    .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
+    .admin-main, .main-wrap{ padding:18px 12px 40px; }
 
     /* On a phone, the persistent sidebar becomes a hamburger button that
        opens the same nav as a slide-in drawer instead — no room for a
