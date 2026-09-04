@@ -2377,12 +2377,22 @@ function showNotionSelectOverlay(rows){
 function render(){
   const app = document.getElementById('app');
   document.body.classList.toggle('admin-mode', view === 'admin');
+  // A full innerHTML replace recreates the sidebar as a brand-new element
+  // every render, which would otherwise silently reset its scroll to the
+  // top on every click — capture it right before replacing, restore it
+  // right after.
+  const prevSidebar = document.querySelector('.admin-sidebar-desktop');
+  const sidebarScrollTop = prevSidebar ? prevSidebar.scrollTop : 0;
   if(view==='apply') app.innerHTML = renderApplyPage();
   else if(view==='signupForm') app.innerHTML = currentTutorUser ? renderSignupFormPage() : renderTutorLoginGate('signup');
   else if(view==='deviceForm') app.innerHTML = currentTutorUser ? renderDeviceFormPage() : renderTutorLoginGate('device');
   else if(view==='gate') app.innerHTML = renderGate();
   else if(view==='book') app.innerHTML = renderTopbar(currentTutorUser ? 'tutor' : 'applicant') + renderBook() + (tutorProfileModalOpen ? renderTutorProfileModal() : '');
   else if(view==='admin') app.innerHTML = renderTopbar('admin') + renderAdmin();
+  if(view==='admin' && sidebarScrollTop > 0){
+    const newSidebar = document.querySelector('.admin-sidebar-desktop');
+    if(newSidebar) newSidebar.scrollTop = sidebarScrollTop;
+  }
   attachHandlers();
 }
 
