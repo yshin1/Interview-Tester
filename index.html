@@ -57,6 +57,8 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
+  body.admin-mode{ height:100vh; overflow:hidden; }
+  body.admin-mode #app{ height:100vh; }
   body{
     font-family:'Inter', -apple-system, 'Segoe UI', sans-serif;
     background:var(--paper);
@@ -2367,6 +2369,7 @@ function showNotionSelectOverlay(rows){
 
 function render(){
   const app = document.getElementById('app');
+  document.body.classList.toggle('admin-mode', view === 'admin');
   if(view==='apply') app.innerHTML = renderApplyPage();
   else if(view==='signupForm') app.innerHTML = currentTutorUser ? renderSignupFormPage() : renderTutorLoginGate('signup');
   else if(view==='deviceForm') app.innerHTML = currentTutorUser ? renderDeviceFormPage() : renderTutorLoginGate('device');
