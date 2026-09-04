@@ -3484,21 +3484,24 @@ function renderChatPanel(bookingId, viewerRole){
    ============================================================ */
 const TAB_GROUPS = [
   { label: 'Calendar', tab: 'calendar' },
-  { label: 'Applications', tab: 'applications' },
+  { label: 'Applications', children: [
+      ['applications','Screening'],
+      ['list','1st Demo'],
+      ['secondDemo','2nd Demo'],
+      ['onboarding','Onboarding']
+    ]
+  },
   { label: 'Archive', children: [
       ['archiveApplicants','Applicants'],
       ['archiveTutors','Tutors']
     ]
   },
   { label: 'Demo', children: [
-      ['list','1st Demo'],
-      ['secondDemo','2nd Demo'],
       ['dates','Availability'],
       ['capacity','Slot Settings']
     ]
   },
   { label: 'Onboarding', children: [
-      ['onboarding','Onboarding'],
       ['accountSignups','Account Signups'],
       ['deviceSubmissions','Device']
     ]
@@ -3563,7 +3566,7 @@ function unreadCountForTabKey(key){
 // device submissions rather than chat messages.
 function newCountForTabKey(key){
   const isNew = r => r.viewedByAdmin === false;
-  if(key === 'applications') return applications.filter(a => !isArchivedApplication(a) && !hasMovedOnFromApplication(a) && isNew(a)).length;
+  if(key === 'applications') return applications.filter(a => !hasMovedOnFromApplication(a) && isNew(a)).length;
   if(key === 'list') return bookings.filter(b => b.demoResult !== 'pass' && isNew(b)).length;
   // Excludes bookings that already have a 2nd demo result — once a decision
   // is made they've effectively moved on to onboarding, so they shouldn't
@@ -3871,7 +3874,7 @@ function renderAdminApplications(){
   // Failed applications move to Archive automatically and no longer clutter
   // the active pipeline here — they're still fully viewable under Archive →
   // Application.
-  const activeApplications = applications.filter(a => !isArchivedApplication(a) && !hasMovedOnFromApplication(a));
+  const activeApplications = applications.filter(a => !hasMovedOnFromApplication(a));
   if(activeApplications.length === 0){
     return `<div class="card">${shareLinkBox}<div class="empty-state">No applications yet.</div></div>`;
   }
@@ -3882,6 +3885,7 @@ function renderAdminApplications(){
   if(applicationFilterInvited==='notInvited') filtered = filtered.filter(a => !a.invited);
   if(applicationFilterResult==='pending') filtered = filtered.filter(a => !a.result);
   else if(applicationFilterResult==='pass') filtered = filtered.filter(a => a.result==='pass');
+  else if(applicationFilterResult==='fail') filtered = filtered.filter(a => a.result==='fail');
   if(applicationFilterEducation==='highschool') filtered = filtered.filter(a => a.education==='High school');
   else if(applicationFilterEducation==='college') filtered = filtered.filter(a => a.education && a.education!=='High school');
   const sorted = [...filtered].sort((a,b) => applicationSortOrder === 'newest'
@@ -3939,7 +3943,7 @@ function renderAdminApplications(){
       <button class="btn btn-primary btn-sm" id="bulkInviteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>✉️ Send Invite to Selected (${selectedCount})</button>
       <button class="btn btn-danger-outline btn-sm" id="bulkDeleteBtn" style="width:auto;" ${selectedCount===0?'disabled':''}>🗑️ Delete Selected (${selectedCount})</button>
     </div>
-    <div class="section-desc" style="margin-bottom:12px;">Failed applications move to <strong>Archive → Application</strong> automatically and aren't shown here.</div>
+    <div class="section-desc" style="margin-bottom:12px;">Failed applications stay visible here and are also recorded under <strong>Archive → Application</strong> — failing no longer removes them from this list.</div>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:nowrap;">
       <label style="margin:0; white-space:nowrap;">Sort</label>
       <select id="appSortOrder" style="max-width:150px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
@@ -3962,6 +3966,7 @@ function renderAdminApplications(){
       <select id="appFilterResult" style="max-width:160px; padding:9px 12px; border:1.5px solid var(--line); border-radius:10px; font-size:13.5px; font-family:inherit;">
         <option value="all" ${applicationFilterResult==='all'?'selected':''}>All (${activeApplications.length})</option>
         <option value="pass" ${applicationFilterResult==='pass'?'selected':''}>Pass (${activeApplications.filter(a=>a.result==='pass').length})</option>
+        <option value="fail" ${applicationFilterResult==='fail'?'selected':''}>Fail (${activeApplications.filter(a=>a.result==='fail').length})</option>
         <option value="pending" ${applicationFilterResult==='pending'?'selected':''}>Pending (${activeApplications.filter(a=>!a.result).length})</option>
       </select>
       <label style="margin:0; white-space:nowrap;">Invited</label>
