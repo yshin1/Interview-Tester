@@ -266,6 +266,12 @@
   .admin-sidebar-item.active{ background:var(--navy); color:#fff; }
   .admin-sidebar-item:hover{ background:#F5F6F8; }
   .admin-sidebar-item.active:hover{ background:var(--navy); }
+  .admin-shell{ display:flex; align-items:flex-start; gap:26px; }
+  .admin-sidebar-desktop{
+    flex-shrink:0; width:220px; background:#fff; border:1px solid var(--line); border-radius:14px;
+    padding:14px 10px; position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto;
+  }
+  .admin-main{ flex:1; min-width:0; }
 
   /* ---------- calendar ---------- */
   .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -393,11 +399,10 @@
     table.list-table{ font-size:12px; }
     .admin-wrap, .main-wrap{ padding:18px 12px 40px; }
 
-    /* Swaps the admin nav's wrapped rows of tab buttons (messy on a phone
-       — often 2-3 lines of wrapped buttons before you even reach the page
-       content) for a hamburger button that opens a slide-in sidebar.
-       Desktop keeps the tab-button rows as-is. */
-    .admin-tabs-desktop, .admin-subtabs-desktop{ display:none; }
+    /* On a phone, the persistent sidebar becomes a hamburger button that
+       opens the same nav as a slide-in drawer instead — no room for a
+       fixed 220px column on a narrow screen. */
+    .admin-sidebar-desktop{ display:none; }
     .admin-mobile-menu-btn{ display:flex; }
 
     /* Chat list only (scoped via .chat-list-table, not the shared
@@ -3578,32 +3583,11 @@ function newCountForTabKey(key){
 
 function renderAdmin(){
   const currentGroup = findTabGroup(adminTab);
-  const primaryTabsHtml = TAB_GROUPS.map(g => {
-    const isActive = g === currentGroup;
-    const clickTarget = g.tab || g.children[0][0]; // groups with children default to their first sub-tab
-    const keys = g.children ? g.children.map(([k]) => k) : [g.tab];
-    const newCount = keys.reduce((sum, k) => sum + newCountForTabKey(k), 0);
-    return `<div class="admin-tab ${isActive?'active':''}" data-group-tab="${clickTarget}">${g.label}${newCount>0?`<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>`:''}</div>`;
-  }).join('');
-  const subTabsHtml = currentGroup.children ? `
-    <div class="admin-subtabs admin-subtabs-desktop">
-      ${currentGroup.children.map(([k,label]) => {
-        const unread = unreadCountForTabKey(k);
-        const newCount = newCountForTabKey(k);
-        const badge = unread>0
-          ? `<span class="unread-badge" style="margin-left:6px;">${unread}</span>`
-          : newCount>0 ? `<span class="unread-badge" style="margin-left:6px;">${newCount>9?'9+':newCount}</span>` : '';
-        return `<div class="admin-subtab ${adminTab===k?'active':''}" data-tab="${k}">${label}${badge}</div>`;
-      }).join('')}
-    </div>` : '';
 
-  // Mobile-only: a hamburger button showing the current page name, and a
-  // slide-in sidebar listing every group (with its sub-tabs nested
-  // underneath, if any) as one flat, tappable list — replaces the wrapped
-  // multi-row tab buttons, which is what the desktop layout above still
-  // uses. Always rendered in the DOM; the 'open' class (toggled by
-  // adminSidebarOpen) is what actually shows it, so no separate branch is
-  // needed for open vs. closed.
+  // One shared list of every group (with sub-items nested underneath, if
+  // any) drives BOTH the persistent desktop sidebar and the mobile
+  // slide-in drawer — same markup either way, CSS alone decides which is
+  // actually visible at a given screen width.
   const currentLeafLabel = currentGroup.children
     ? (currentGroup.children.find(([k]) => k === adminTab) || currentGroup.children[0])[1]
     : currentGroup.label;
@@ -3660,11 +3644,14 @@ function renderAdmin(){
 
   return `
   <div class="admin-wrap">
-    <div class="admin-tabs admin-tabs-desktop">${primaryTabsHtml}</div>
-    ${mobileNavHtml}
-    ${subTabsHtml}
-    ${currentGroup.label === 'Chat' ? renderChatNotificationBanner() : ''}
-    ${body}
+    <div class="admin-shell">
+      <div class="admin-sidebar-desktop">${sidebarItemsHtml}</div>
+      <div class="admin-main">
+        ${mobileNavHtml}
+        ${currentGroup.label === 'Chat' ? renderChatNotificationBanner() : ''}
+        ${body}
+      </div>
+    </div>
     ${editingBooking ? renderEditModal() : ''}
     ${cancelTarget ? renderCancelModal() : ''}
     ${chatTarget ? renderAdminChatModal() : ''}
