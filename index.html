@@ -806,7 +806,7 @@ const APPLY_FORM_DEFAULT_SCHEMA = [
   {id:'platform', type:'text', label:'How did you hear about us?'},
   {id:'workedBefore', type:'yesno', label:'Worked at Langdy before'},
   {id:'interviewedBefore', type:'yesno', label:'Interviewed before'},
-  {id:'email', type:'email', label:'Email Address'},
+  {id:'email', type:'email', label:'Email Address', description:'Must be a Gmail address (e.g. name@gmail.com).'},
   {id:'hasKakaoAccount', type:'yesno', label:'Do you have a KakaoTalk account?'},
   {id:'section_background', type:'section', label:'Background'},
   {id:'education', type:'select', label:'Education', options: EDUCATION_OPTIONS},
@@ -5947,6 +5947,9 @@ function attachHandlers(){
       }
       if(emailField && !isValidEmail((state.answers[emailField.id]||'').trim())){
         state.error = 'Please enter a valid email address (e.g. name@example.com).'; render(); return;
+      }
+      if(emailField && !(state.answers[emailField.id]||'').trim().toLowerCase().endsWith('@gmail.com')){
+        state.error = 'Please use a Gmail address to apply (e.g. name@gmail.com).'; render(); return;
       }
       state.busy = true; render();
       try{
